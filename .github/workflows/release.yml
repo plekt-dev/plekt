@@ -15,7 +15,7 @@ permissions:
   id-token: write
 
 env:
-  REGISTRY_REPO: plekt-dev/test-registry
+  REGISTRY_REPO: plekt-dev/registry
   REGISTRY_BRANCH: main
 
 jobs:
@@ -237,12 +237,9 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      # -------------------------------------------------------------------
-      # Open a PR against plekt-dev/test-registry with the new `core`
-      # section pre-filled. A maintainer reviews, merges, and the next
-      # Plekt core poll (per-instance cache TTL, default 1h) picks up
-      # the update.
-      # -------------------------------------------------------------------
+      # Open a PR against the registry repo with the new core section
+      # pre-filled. A maintainer reviews and merges; subsequent Plekt
+      # instances pick it up on their next registry poll.
       - name: Checkout registry
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
         with:
