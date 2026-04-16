@@ -150,12 +150,14 @@ func T(ctx context.Context, msgID string) string {
 }
 
 // DetectLanguage determines the user's preferred language from:
-// 1. mc_lang cookie (explicit user choice)
-// 2. Accept-Language header
-// 3. defaultLang from settings
-// Returns a supported language code.
+// 1. mc_lang cookie (explicit user choice via the UI language switcher)
+// 2. defaultLang from settings
+// 3. DefaultLanguage ("en")
+// Browser Accept-Language is intentionally ignored: a self-hosted instance
+// should land on a predictable default (English) until the user picks
+// otherwise, rather than silently following whatever locale the browser
+// happens to advertise.
 func DetectLanguage(r *http.Request, defaultLang string) string {
-	// 1. Cookie
 	if cookie, err := r.Cookie("mc_lang"); err == nil {
 		lang := normalizeLang(cookie.Value)
 		if isSupported(lang) {
@@ -163,20 +165,6 @@ func DetectLanguage(r *http.Request, defaultLang string) string {
 		}
 	}
 
-	// 2. Accept-Language header
-	if accept := r.Header.Get("Accept-Language"); accept != "" {
-		tags, _, err := language.ParseAcceptLanguage(accept)
-		if err == nil {
-			for _, tag := range tags {
-				lang := normalizeLang(tag.String())
-				if isSupported(lang) {
-					return lang
-				}
-			}
-		}
-	}
-
-	// 3. Settings default
 	if defaultLang != "" && isSupported(defaultLang) {
 		return defaultLang
 	}

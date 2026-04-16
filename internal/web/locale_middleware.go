@@ -10,9 +10,9 @@ import (
 // LocaleMiddleware detects the user's preferred language and injects
 // an i18n.Localizer into the request context. Detection order:
 // 1. mc_lang cookie (explicit user choice via language switcher)
-// 2. Accept-Language header
-// 3. Global language setting from settings store
-// 4. Fallback: "en"
+// 2. Fallback: "en"
+// Browser Accept-Language is intentionally ignored so a fresh session
+// always lands on English until the user picks otherwise.
 func LocaleMiddleware(store settings.SettingsStore) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

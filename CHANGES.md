@@ -1,3 +1,8 @@
+# 1.0.2 (17.04.2026)
+
+## Fixes
+- Default UI language is now always English
+
 # 1.0.1 (16.04.2026)
 
 ## Fixes
