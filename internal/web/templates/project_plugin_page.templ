@@ -1,0 +1,116 @@
+package templates
+
+import "fmt"
+
+// ProjectPluginPageData holds data for rendering a plugin page within project context.
+type ProjectPluginPageData struct {
+	CSRFToken      string
+	PluginName     string
+	PageID         string
+	PageTitle      string
+	PageType       string
+	DataJSON       string
+	ToolsJSON      string
+	ExtensionsJSON string
+	Error          string
+	UserID         int64
+	Username       string
+	ScriptURL      string
+	StyleURL       string
+	Sidebar        ProjectSidebarData
+}
+
+// ProjectPluginPageFull renders a complete page with project sidebar (for direct URL access).
+templ ProjectPluginPageFull(data ProjectPluginPageData) {
+	<!DOCTYPE html>
+	<html lang={ Lang(ctx) }>
+		<head>
+			<meta charset="UTF-8"/>
+			<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+			<title>{ "Plekt : " + data.Sidebar.ProjectName + " : " + data.PageTitle }</title>
+			<link rel="icon" type="image/x-icon" href="/static/favicon.ico"/>
+			<link rel="icon" type="image/png" sizes="32x32" href="/static/favicon-32x32.png"/>
+			<link rel="icon" type="image/png" sizes="16x16" href="/static/favicon-16x16.png"/>
+			<link rel="apple-touch-icon" sizes="180x180" href="/static/apple-touch-icon.png"/>
+			<link rel="manifest" href="/static/site.webmanifest"/>
+			<link rel="stylesheet" href="/static/css/style.css"/>
+			<link rel="stylesheet" href="/static/css/editor.css"/>
+			<script src="/static/js/vendor/htmx.min.js"></script>
+			<script src="/static/js/vendor/mermaid.min.js"></script>
+			<script src="/static/js/editor.js" defer></script>
+			<script src="/static/js/main.js" defer></script>
+			for _, s := range GlobalScriptsFromContext(ctx) {
+				if s.CSSURL != "" {
+					<link rel="stylesheet" href={ s.CSSURL }/>
+				}
+				<script src={ s.URL } defer></script>
+			}
+			<meta id="mc-i18n-data" data-translations={ I18nJSON(ctx) }/>
+		</head>
+		<body>
+			<aside id="sidebar" class="sidebar">
+			<script>
+				(function(){
+					var s=document.getElementById('sidebar');
+					if(localStorage.getItem('sidebar-collapsed')==='true') s.classList.add('collapsed');
+					s.classList.add('no-transition');
+					requestAnimationFrame(function(){ requestAnimationFrame(function(){ s.classList.remove('no-transition'); }); });
+				})();
+			</script>
+				@ProjectSidebar(data.Sidebar, false)
+				@SidebarFooter(data.CSRFToken)
+			</aside>
+			<main class="main-content">
+				<header class="header">
+					<button class="button button-ghost button-icon sidebar-trigger">
+						<svg class="icon sidebar-icon-collapse" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"></rect><line x1="9" y1="3" x2="9" y2="21"></line><polyline points="14 9 11 12 14 15"></polyline></svg>
+						<svg class="icon sidebar-icon-expand" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"></rect><line x1="9" y1="3" x2="9" y2="21"></line><polyline points="13 9 16 12 13 15"></polyline></svg>
+					</button>
+				</header>
+				<div id="content" class="page-body">
+					@projectPluginContent(data)
+				</div>
+			</main>
+		</body>
+	</html>
+}
+
+// ProjectPluginPagePartial renders content + OOB sidebar for htmx requests.
+templ ProjectPluginPagePartial(data ProjectPluginPageData) {
+	@ProjectSidebar(data.Sidebar, true)
+	@projectPluginContent(data)
+}
+
+// projectPluginContent renders the plugin content area (shared between full and partial).
+templ projectPluginContent(data ProjectPluginPageData) {
+	if data.StyleURL != "" {
+		<link rel="stylesheet" href={ data.StyleURL }/>
+	}
+	if data.ScriptURL != "" {
+		<script src={ data.ScriptURL } defer></script>
+	}
+	if data.Error != "" {
+		@AlertError(data.Error)
+	} else {
+		<div
+			class="plugin-page-content"
+			data-page-type={ data.PageType }
+			data-plugin={ data.PluginName }
+			data-page={ data.PageID }
+			data-json={ data.DataJSON }
+			data-tools={ data.ToolsJSON }
+			data-action-url={ "/p/" + data.PluginName + "/action/" }
+			data-csrf={ data.CSRFToken }
+			if data.Username != "" {
+				data-username={ data.Username }
+			}
+			if data.UserID > 0 {
+				data-user-id={ fmt.Sprintf("%d", data.UserID) }
+			}
+			if data.ExtensionsJSON != "" {
+				data-extensions={ data.ExtensionsJSON }
+			}
+			data-project-id={ fmt.Sprintf("%d", data.Sidebar.ProjectID) }
+		></div>
+	}
+}

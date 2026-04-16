@@ -1,0 +1,128 @@
+package templates
+
+// CoreUpdateSection renders the core updater card on the settings page.
+templ CoreUpdateSection(data CoreUpdateData) {
+	<div id="core-update-section">
+		@Card(T(ctx, "update.section_title")) {
+			<div style="font-size: 13px;">
+				<div style="margin-bottom: 0.75rem;">
+					<span style="color: var(--muted-foreground);">{ T(ctx, "update.current_version") }:</span>
+					<span style="font-weight: bold;">{ data.CurrentVersion }</span>
+				</div>
+				if data.IsDocker {
+					<div class="alert alert-info" style="font-size: 11px; margin-bottom: 0.75rem;">
+						<p>{ T(ctx, "update.docker_notice") }</p>
+						<code style="display: block; margin-top: 0.5rem; font-size: 11px;">docker pull ghcr.io/plekt-dev/plekt:latest</code>
+					</div>
+				}
+				if data.Status == "available" {
+					<div style="margin-bottom: 0.75rem;">
+						<span class="badge badge-warning" style="font-size: 11px;">{ T(ctx, "update.available") }</span>
+					</div>
+					<div style="margin-bottom: 0.5rem;">
+						<span style="color: var(--muted-foreground);">{ T(ctx, "update.latest_version") }:</span>
+						<span style="font-weight: bold;">{ data.LatestVersion }</span>
+					</div>
+					if data.ReleaseNotes != "" {
+						<div style="margin-bottom: 0.75rem;">
+							<span style="color: var(--muted-foreground);">{ T(ctx, "update.release_notes") }:</span>
+							<p style="font-size: 11px; margin-top: 0.25rem; white-space: pre-wrap;">{ data.ReleaseNotes }</p>
+						</div>
+					}
+					if !data.IsDocker {
+						<form
+							method="POST"
+							action="/api/core/update"
+							hx-post="/api/core/update"
+							hx-target="#core-update-section"
+							hx-swap="outerHTML"
+							style="display: inline;"
+						>
+							<input type="hidden" name="csrf_token" value={ data.CSRFToken }/>
+							<button
+								type="submit"
+								class="button button-primary"
+								onclick={ confirmUpdate(data.LatestVersion) }
+							>
+								{ T(ctx, "update.apply_update") + " " + data.LatestVersion }
+							</button>
+						</form>
+					}
+				} else if data.Status == "downloading" {
+					<div style="margin-bottom: 0.75rem;">
+						<span class="badge badge-info" style="font-size: 11px;">{ T(ctx, "update.downloading") }</span>
+					</div>
+				} else if data.Status == "ready" {
+					<div style="margin-bottom: 0.75rem;">
+						@AlertSuccess(T(ctx, "update.restarting"))
+					</div>
+					@autoReload()
+				} else if data.Status == "failed" {
+					<div style="margin-bottom: 0.75rem;">
+						<span class="badge badge-error" style="font-size: 11px;">{ T(ctx, "update.failed") }</span>
+						if data.Error != "" {
+							<p style="font-size: 11px; color: hsl(var(--destructive)); margin-top: 0.25rem;">{ data.Error }</p>
+						}
+					</div>
+				} else {
+					<div style="margin-bottom: 0.75rem;">
+						<span class="badge badge-success" style="font-size: 11px;">{ T(ctx, "update.up_to_date") }</span>
+					</div>
+				}
+				<form
+					method="POST"
+					action="/api/core/check-update"
+					hx-post="/api/core/check-update"
+					hx-target="#core-update-section"
+					hx-swap="outerHTML"
+					style="display: inline; margin-top: 0.5rem;"
+				>
+					<input type="hidden" name="csrf_token" value={ data.CSRFToken }/>
+					<button type="submit" class="button button-ghost" style="font-size: 11px;">
+						{ T(ctx, "update.check_now") }
+					</button>
+				</form>
+			</div>
+		}
+	</div>
+}
+
+script confirmUpdate(version string) {
+	event.preventDefault();
+	var form = event.target.closest('form');
+	MC.confirm({
+		title: MC.t('update.confirm_update', 'Update Plekt'),
+		message: MC.t('update.confirm_message', 'Update to version') + ' ' + version + '?',
+		okText: MC.t('update.update', 'Update'),
+		danger: false,
+	}).then(function(ok) {
+		if (ok && form) { form.submit(); }
+	});
+}
+
+// autoReload polls the server after update. Once the old process is killed
+// and the new one starts, the page reloads automatically.
+script autoReload() {
+	(function() {
+		var attempts = 0;
+		var maxAttempts = 60;
+		function ping() {
+			if (attempts++ > maxAttempts) return;
+			fetch('/health', {method: 'GET', cache: 'no-store'})
+				.then(function(r) {
+					if (r.ok) {
+						// Small extra delay to let the new server fully initialize.
+						setTimeout(function() { window.location.reload(); }, 500);
+					} else {
+						setTimeout(ping, 1000);
+					}
+				})
+				.catch(function() {
+					// Server is down (being restarted) : keep polling.
+					setTimeout(ping, 1000);
+				});
+		}
+		// Start polling after a brief delay to let the updater kill us.
+		setTimeout(ping, 2000);
+	})();
+}

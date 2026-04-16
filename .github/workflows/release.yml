@@ -1,0 +1,305 @@
+name: Release
+
+# Full distribution pipeline triggered by a semver tag push.
+
+
+on:
+  push:
+    tags:
+      - '[0-9]+.[0-9]+.[0-9]+'
+      - '[0-9]+.[0-9]+.[0-9]+-*'
+
+permissions:
+  contents: write
+  packages: write
+  id-token: write
+
+env:
+  REGISTRY_REPO: plekt-dev/test-registry
+  REGISTRY_BRANCH: main
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+        with:
+          fetch-depth: 100
+
+      - name: Verify tag is reachable from main
+        run: |
+          git fetch origin main --depth=100
+          if ! git merge-base --is-ancestor "${{ github.sha }}" origin/main; then
+            echo "::error::Tag ${{ github.ref_name }} (${{ github.sha }}) is not reachable from main. Releases must be tagged on merged commits."
+            exit 1
+          fi
+          echo "tag verified on main"
+
+      # -------------------------------------------------------------------
+      # Cross-compile binaries
+      # -------------------------------------------------------------------
+      - name: Setup Go
+        uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c  # v6.4.0
+        with:
+          go-version: '1.25'
+
+      - name: Generate templ
+        # Generated *_templ.go files are intentionally NOT committed; they
+        # are produced on every CI run so the repo stays source-only.
+        # Pin templ CLI to the exact version of the a-h/templ library in
+        # go.mod so generator and runtime always match.
+        run: |
+          TEMPL_VERSION="$(go list -m -f '{{.Version}}' github.com/a-h/templ)"
+          echo "installing templ ${TEMPL_VERSION}"
+          go install github.com/a-h/templ/cmd/templ@${TEMPL_VERSION}
+          templ generate ./internal/web/templates
+
+      - name: Cross-compile + package archives
+        id: build
+        run: |
+          set -eu
+          VERSION="${{ github.ref_name }}"
+          LDFLAGS="-s -w -X github.com/plekt-dev/plekt/internal/version.Version=${VERSION}"
+          mkdir -p dist
+
+          TARGETS=(
+            "linux/amd64"
+            "linux/arm64"
+            "darwin/amd64"
+            "darwin/arm64"
+            "windows/amd64"
+            "windows/arm64"
+          )
+
+          for t in "${TARGETS[@]}"; do
+            OS="${t%/*}"
+            ARCH="${t#*/}"
+            EXT=""
+            [ "$OS" = "windows" ] && EXT=".exe"
+
+            echo "::group::build ${OS}/${ARCH}"
+
+            # Build into a clean staging dir so the binaries inside the
+            # archive have short, unambiguous names: `plekt-core` /
+            # `plekt-updater` (no OS/arch suffix). That's what the
+            # auto-updater extracts; it doesn't care about the archive
+            # filename once it sees "plekt-core[.exe]" inside.
+            STAGE="dist/.stage/${OS}-${ARCH}"
+            mkdir -p "$STAGE"
+
+            CGO_ENABLED=0 GOOS="$OS" GOARCH="$ARCH" go build \
+              -ldflags "$LDFLAGS" \
+              -o "${STAGE}/plekt-core${EXT}" \
+              ./cmd/plekt-core/
+
+            CGO_ENABLED=0 GOOS="$OS" GOARCH="$ARCH" go build \
+              -ldflags "-s -w" \
+              -o "${STAGE}/plekt-updater${EXT}" \
+              ./cmd/plekt-updater/
+
+            # Package: .zip for Windows, .tar.gz for Linux/macOS.
+            ARCHIVE_BASE="plekt_${VERSION}_${OS}_${ARCH}"
+            if [ "$OS" = "windows" ]; then
+              (cd "$STAGE" && zip -q "../../${ARCHIVE_BASE}.zip" "plekt-core${EXT}" "plekt-updater${EXT}")
+            else
+              (cd "$STAGE" && tar czf "../../${ARCHIVE_BASE}.tar.gz" "plekt-core${EXT}" "plekt-updater${EXT}")
+            fi
+
+            echo "::endgroup::"
+          done
+
+          rm -rf dist/.stage
+          ls -la dist/
+
+      - name: Compute SHA-256 and emit core.json
+        id: meta
+        run: |
+          set -eu
+          VERSION="${{ github.ref_name }}"
+          RELEASED_AT="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+          BASE_URL="https://github.com/${{ github.repository }}/releases/download/${VERSION}"
+
+          RELEASE_NOTES="$(git tag -l --format='%(contents)' "$VERSION" | sed '/^$/d' || true)"
+          if [ -z "$RELEASE_NOTES" ]; then
+            RELEASE_NOTES="Plekt ${VERSION}"
+          fi
+
+          # binaries[] entries point at the archive, not a raw binary.
+          # The auto-updater extracts plekt-core(.exe) from the archive
+          # based on the URL's suffix (.zip for Windows, .tar.gz otherwise).
+          BINARIES_JSON='[]'
+          for f in dist/plekt_*.zip dist/plekt_*.tar.gz; do
+            [ -e "$f" ] || continue
+            name="$(basename "$f")"
+            # Parse plekt_<version>_<os>_<arch>.(zip|tar.gz)
+            stem="${name#plekt_${VERSION}_}"
+            stem="${stem%.zip}"
+            stem="${stem%.tar.gz}"
+            OS="${stem%_*}"
+            ARCH="${stem##*_}"
+            SHA="$(sha256sum "$f" | cut -d' ' -f1)"
+            SIZE="$(stat -c%s "$f")"
+            URL="${BASE_URL}/${name}"
+            BINARIES_JSON="$(jq -c --arg os "$OS" --arg arch "$ARCH" --arg url "$URL" \
+              --arg sha "$SHA" --argjson size "$SIZE" \
+              '. + [{os: $os, arch: $arch, download_url: $url, checksum_sha256: $sha, size_bytes: $size}]' \
+              <<<"$BINARIES_JSON")"
+          done
+
+          jq -n --arg version "$VERSION" --arg notes "$RELEASE_NOTES" \
+                --arg released_at "$RELEASED_AT" --argjson binaries "$BINARIES_JSON" \
+            '{core: {version: $version, release_notes: $notes, released_at: $released_at, binaries: $binaries}}' \
+            > dist/core.json
+
+          echo "=== core.json ==="
+          cat dist/core.json
+
+      # -------------------------------------------------------------------
+      # GitHub Release (raw binaries as assets)
+      # -------------------------------------------------------------------
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@b4309332981a82ec1c5618f44dd2e27cc8bfbfda  # v3.0.0
+        with:
+          tag_name: ${{ github.ref_name }}
+          files: |
+            dist/plekt_*.tar.gz
+            dist/plekt_*.zip
+            dist/core.json
+          append_body: true
+          body: |
+
+            ---
+            ### Install
+
+            **Docker** (recommended):
+            ```
+            docker pull ghcr.io/plekt-dev/plekt:${{ github.ref_name }}
+            ```
+
+            **Linux / macOS**:
+            ```
+            curl -LO https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/plekt_${{ github.ref_name }}_linux_amd64.tar.gz
+            tar xzf plekt_${{ github.ref_name }}_linux_amd64.tar.gz
+            ./plekt-core
+            ```
+
+            **Windows**: download `plekt_${{ github.ref_name }}_windows_amd64.zip`, unzip, run `plekt-core.exe`.
+
+            Each archive contains `plekt-core` and `plekt-updater` with clean
+            filenames no OS/arch suffix. Plekt's auto-updater consumes
+            the same archives on update check.
+
+      # -------------------------------------------------------------------
+      # Docker image (multi-arch → GHCR)
+      # -------------------------------------------------------------------
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@ce360397dd3f832beb865e1373c09c0e9f86d70a  # v4.0.0
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd  # v4.0.0
+
+      - name: Login to GHCR
+        uses: docker/login-action@4907a6ddec9925e35a0a9e82d7399ccc52663121  # v4.1.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract image metadata
+        id: docker_meta
+        uses: docker/metadata-action@030e881283bb7a6894de51c315a6bfe6a94e05cf  # v6.0.0
+        with:
+          images: ghcr.io/plekt-dev/plekt
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}}
+            type=raw,value=latest,enable=${{ !contains(github.ref_name, '-') }}
+          labels: |
+            org.opencontainers.image.title=Plekt
+            org.opencontainers.image.description=Self-hosted workspace where humans and AI agents work together
+            org.opencontainers.image.source=https://github.com/plekt-dev/plekt
+            org.opencontainers.image.licenses=AGPL-3.0-only
+            org.opencontainers.image.version=${{ github.ref_name }}
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@bcafcacb16a39f128d818304e6c9c0c18556b85f  # v7.1.0
+        with:
+          context: .
+          file: ./Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.docker_meta.outputs.tags }}
+          labels: ${{ steps.docker_meta.outputs.labels }}
+          build-args: |
+            VERSION=${{ github.ref_name }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # -------------------------------------------------------------------
+      # Open a PR against plekt-dev/test-registry with the new `core`
+      # section pre-filled. A maintainer reviews, merges, and the next
+      # Plekt core poll (per-instance cache TTL, default 1h) picks up
+      # the update.
+      # -------------------------------------------------------------------
+      - name: Checkout registry
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+        with:
+          repository: ${{ env.REGISTRY_REPO }}
+          token: ${{ secrets.REGISTRY_PR_TOKEN }}
+          ref: ${{ env.REGISTRY_BRANCH }}
+          path: registry-source
+
+      - name: Merge core section into registry.json
+        run: |
+          set -eu
+          cd registry-source
+          # Replace only the `core` key; leave `plugins`, `revoked`, etc. untouched.
+          jq --slurp '.[0] * .[1]' registry.json ../dist/core.json > registry.json.new
+          mv registry.json.new registry.json
+          echo "=== diff ===" && git diff registry.json | head -60 || true
+
+      - name: Create PR in registry
+        uses: peter-evans/create-pull-request@5f6978faf089d4d20b00c7766989d076bb2fc7f1  # v8.1.1
+        with:
+          path: registry-source
+          token: ${{ secrets.REGISTRY_PR_TOKEN }}
+          branch: "core/${{ github.ref_name }}"
+          title: "core: release ${{ github.ref_name }}"
+          commit-message: "core: release ${{ github.ref_name }}"
+          body: |
+            Auto-generated by plekt-dev/plekt Release workflow for tag **${{ github.ref_name }}**.
+
+            Updates `registry.json`'s `core` field with the per-OS/arch
+            binary URLs, SHA-256 checksums, and size from this release.
+
+            Downstream effect: every running Plekt core sees the new
+            version on its next registry poll. Binary installations
+            auto-update via `plekt-updater`; Docker installations see a
+            "docker pull" notice in the UI.
+
+            Release assets: https://github.com/${{ github.repository }}/releases/tag/${{ github.ref_name }}
+          labels: |
+            automated
+            core-release
+          delete-branch: true
+
+      # -------------------------------------------------------------------
+      # Final summary in Actions UI
+      # -------------------------------------------------------------------
+      - name: Summary
+        run: |
+          {
+            echo "### Plekt ${{ github.ref_name }} released"
+            echo ""
+            echo "**Docker**"
+            echo '```'
+            echo "${{ steps.docker_meta.outputs.tags }}"
+            echo '```'
+            echo ""
+            echo "**Binaries** 12 files (6 OS/arch × core+updater):"
+            echo "https://github.com/${{ github.repository }}/releases/tag/${{ github.ref_name }}"
+            echo ""
+            echo "**Registry PR** opened against \`${{ env.REGISTRY_REPO }}\`."
+          } >> $GITHUB_STEP_SUMMARY

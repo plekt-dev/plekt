@@ -1,0 +1,196 @@
+package templates
+
+// BaseLayoutData carries per-page values for the shared layout.
+type BaseLayoutData struct {
+	Title      string
+	CSRFToken  string
+	ActivePage string
+}
+
+templ BaseLayout(data BaseLayoutData) {
+	<!DOCTYPE html>
+	<html lang={ Lang(ctx) }>
+		<head>
+			<meta charset="UTF-8"/>
+			<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+			<title>{ SiteNameFromContext(ctx) + " : " + data.Title }</title>
+			<link rel="icon" type="image/x-icon" href="/static/favicon.ico"/>
+			<link rel="icon" type="image/png" sizes="32x32" href="/static/favicon-32x32.png"/>
+			<link rel="icon" type="image/png" sizes="16x16" href="/static/favicon-16x16.png"/>
+			<link rel="apple-touch-icon" sizes="180x180" href="/static/apple-touch-icon.png"/>
+			<link rel="manifest" href="/static/site.webmanifest"/>
+			<link rel="stylesheet" href="/static/css/style.css"/>
+			<link rel="stylesheet" href="/static/css/editor.css"/>
+			<script src="/static/js/vendor/htmx.min.js"></script>
+			<script src="/static/js/vendor/mermaid.min.js"></script>
+			<script src="/static/js/editor.js" defer></script>
+			<script src="/static/js/main.js" defer></script>
+			for _, s := range GlobalScriptsFromContext(ctx) {
+				if s.CSSURL != "" {
+					<link rel="stylesheet" href={ s.CSSURL }/>
+				}
+				<script src={ s.URL } defer></script>
+			}
+			<meta id="mc-i18n-data" data-translations={ I18nJSON(ctx) }/>
+		</head>
+		<body>
+			<aside id="sidebar" class="sidebar">
+			<script>
+				(function(){
+					var s=document.getElementById('sidebar');
+					if(localStorage.getItem('sidebar-collapsed')==='true') s.classList.add('collapsed');
+					s.classList.add('no-transition');
+					requestAnimationFrame(function(){ requestAnimationFrame(function(){ s.classList.remove('no-transition'); }); });
+				})();
+			</script>
+				<div id="sidebar-body" class="sidebar-body">
+				<div class="sidebar-header">
+					<div class="flex items-center gap-2">
+						<div style="width: 28px; height: 28px; border-radius: 6px; background-color: hsl(var(--primary)); display: flex; align-items: center; justify-content: center;">
+							<span style="color: hsl(var(--primary-foreground)); font-weight: bold; font-size: 12px;">{ initials(UsernameFromContext(ctx)) }</span>
+						</div>
+						<div class="sidebar-info">
+							<span class="text-sm font-semibold text-nerve-bone tracking-tight">{ UsernameFromContext(ctx) }</span>
+							<span class="text-xs text-nerve-steel font-mono uppercase tracking-widest block">{ roleLabel(ctx) }</span>
+						</div>
+					</div>
+				</div>
+				<div class="sidebar-content">
+					<div class="sidebar-label">{ T(ctx, "nav.workspace") }</div>
+					<nav>
+						<a href="/dashboard" class={ "nav-item", templ.KV("active", data.ActivePage == "dashboard") } title={ T(ctx, "nav.dashboard") }>
+							<svg class="icon" viewBox="0 0 24 24"><rect width="7" height="9" x="3" y="3" rx="1"></rect><rect width="7" height="5" x="14" y="3" rx="1"></rect><rect width="7" height="9" x="14" y="12" rx="1"></rect><rect width="7" height="5" x="3" y="16" rx="1"></rect></svg>
+							<span class="nav-text">{ T(ctx, "nav.dashboard") }</span>
+						</a>
+						if IsAdmin(ctx) {
+						<a href="/admin/plugins" class={ "nav-item", templ.KV("active", data.ActivePage == "plugins") } title={ T(ctx, "nav.plugins") }>
+							<svg class="icon" viewBox="0 0 24 24"><path d="m21 16-4 4-4-4"></path><path d="M17 20V4"></path><path d="m3 8 4-4 4 4"></path><path d="M7 4v16"></path></svg>
+							<span class="nav-text">{ T(ctx, "nav.plugins") }</span>
+						</a>
+						<a href="/admin/agents" class={ "nav-item", templ.KV("active", data.ActivePage == "agents") } title={ T(ctx, "nav.agents") }>
+							<svg class="icon" viewBox="0 0 24 24"><path d="M12 8V4H8"></path><rect width="16" height="12" x="4" y="8" rx="2"></rect><path d="M2 14h2"></path><path d="M20 14h2"></path><path d="M15 13v2"></path><path d="M9 13v2"></path></svg>
+							<span class="nav-text">{ T(ctx, "nav.agents") }</span>
+						</a>
+						}
+					</nav>
+					if len(PluginNavFromContext(ctx)) > 0 {
+						<div class="sidebar-label" style="margin-top: 1rem;">{ T(ctx, "nav.plugins_section") }</div>
+						<nav>
+							for _, item := range PluginNavFromContext(ctx) {
+								<a href={ templ.SafeURL(item.URL) } class={ "nav-item", templ.KV("active", data.ActivePage == "plugin:"+item.PluginName+":"+item.PageID) } title={ TNav(ctx, item.PluginName, item.PageID, item.Title) }>
+									@pluginIcon(item.Icon)
+									<span class="nav-text">{ TNav(ctx, item.PluginName, item.PageID, item.Title) }</span>
+								</a>
+							}
+						</nav>
+					}
+					<div class="sidebar-label" style="margin-top: 1rem;">{ T(ctx, "nav.administration") }</div>
+					<nav>
+						<a href="/user" class={ "nav-item", templ.KV("active", data.ActivePage == "profile") } title={ T(ctx, "nav.profile") }>
+							<svg class="icon" viewBox="0 0 24 24"><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"></path><circle cx="12" cy="7" r="4"></circle></svg>
+							<span class="nav-text">{ T(ctx, "nav.profile") }</span>
+						</a>
+						if IsAdmin(ctx) {
+						<a href="/admin/audit" class={ "nav-item", templ.KV("active", data.ActivePage == "audit") } title={ T(ctx, "nav.audit_log") }>
+							<svg class="icon" viewBox="0 0 24 24"><path d="m10 10 2 2 8-8"></path><path d="M20 13a8 8 0 1 1-15.5-2"></path></svg>
+							<span class="nav-text">{ T(ctx, "nav.audit_log") }</span>
+						</a>
+						<a href="/admin/users" class={ "nav-item", templ.KV("active", data.ActivePage == "users") } title={ T(ctx, "nav.users") }>
+							<svg class="icon" viewBox="0 0 24 24"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M22 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path></svg>
+							<span class="nav-text">{ T(ctx, "nav.users") }</span>
+						</a>
+						<a href="/admin/settings" class={ "nav-item", templ.KV("active", data.ActivePage == "settings") } title={ T(ctx, "nav.settings") }>
+							<svg class="icon" viewBox="0 0 24 24"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"></path><circle cx="12" cy="12" r="3"></circle></svg>
+							<span class="nav-text">{ T(ctx, "nav.settings") }</span>
+						</a>
+						}
+					</nav>
+				</div>
+				</div>
+				@SidebarFooter(data.CSRFToken)
+			</aside>
+			<script>
+				document.addEventListener('DOMContentLoaded', function() {
+					if (window.MC && MC.events && MC.events._init) { MC.events._init(); }
+				});
+			</script>
+			<main class="main-content">
+				<header class="header">
+					<button class="button button-ghost button-icon sidebar-trigger">
+						<svg class="icon sidebar-icon-collapse" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"></rect><line x1="9" y1="3" x2="9" y2="21"></line><polyline points="14 9 11 12 14 15"></polyline></svg>
+						<svg class="icon sidebar-icon-expand" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"></rect><line x1="9" y1="3" x2="9" y2="21"></line><polyline points="13 9 16 12 13 15"></polyline></svg>
+					</button>
+				</header>
+				if CoreUpdateBannerFromContext(ctx).Available && IsAdmin(ctx) {
+					<div id="core-update-banner" class="core-update-banner">
+						<span>{ T(ctx, "update.banner_text") + " " + CoreUpdateBannerFromContext(ctx).LatestVersion }</span>
+						<a href="/admin/settings" class="button button-sm button-primary">{ T(ctx, "update.banner_action") }</a>
+					</div>
+				}
+				<div id="content" class="page-body">
+					{ children... }
+				</div>
+			</main>
+		</body>
+	</html>
+}
+
+// SidebarFooter renders the sidebar footer with system status, language selector, and logout.
+// This is a core component : plugins must not override or replace it.
+templ SidebarFooter(csrfToken string) {
+	<div class="sidebar-footer">
+		<div class="sidebar-footer-status">
+			@StatusDot("active animate-pulse")
+			<span class="nav-text footer-status-text">{ T(ctx, "nav.system_active") }</span>
+		</div>
+		<div class="sidebar-footer-actions">
+			<div class="lang-picker">
+				<button type="button" class="lang-picker-toggle" aria-haspopup="listbox" aria-expanded="false">
+					<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><path d="M2 12h20"></path><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path></svg>
+					<span class="nav-text lang-picker-label">{ langLabel(Lang(ctx)) }</span>
+				</button>
+				<div class="lang-picker-menu" role="listbox">
+					<input type="hidden" name="csrf_token" value={ csrfToken }/>
+					<button type="button" role="option" class={ "lang-picker-item", templ.KV("active", Lang(ctx) == "en") } data-lang="en" aria-selected={ boolStr(Lang(ctx) == "en") }>
+						<span class="lang-flag">EN</span>
+						<span class="nav-text">English</span>
+					</button>
+					<button type="button" role="option" class={ "lang-picker-item", templ.KV("active", Lang(ctx) == "de") } data-lang="de" aria-selected={ boolStr(Lang(ctx) == "de") }>
+						<span class="lang-flag">DE</span>
+						<span class="nav-text">Deutsch</span>
+					</button>
+					<button type="button" role="option" class={ "lang-picker-item", templ.KV("active", Lang(ctx) == "ru") } data-lang="ru" aria-selected={ boolStr(Lang(ctx) == "ru") }>
+						<span class="lang-flag">RU</span>
+						<span class="nav-text">Русский</span>
+					</button>
+				</div>
+			</div>
+			<form method="POST" action="/logout" class="footer-logout-form">
+				<input type="hidden" name="csrf_token" value={ csrfToken }/>
+				<button type="submit" class="footer-logout-btn" title={ T(ctx, "nav.logout") }>
+					<svg class="icon" viewBox="0 0 24 24"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path><polyline points="16 17 21 12 16 7"></polyline><line x1="21" x2="9" y1="12" y2="12"></line></svg>
+					<span class="nav-text">{ T(ctx, "nav.logout") }</span>
+				</button>
+			</form>
+		</div>
+	</div>
+}
+
+// pluginIcon renders an SVG icon by name. Supports a set of common Lucide icon names.
+// Falls back to a generic puzzle-piece icon for unknown names.
+templ pluginIcon(name string) {
+	switch name {
+		case "file-text":
+			<svg class="icon" viewBox="0 0 24 24"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"></path><path d="M14 2v4a2 2 0 0 0 2 2h4"></path><path d="M10 9H8"></path><path d="M16 13H8"></path><path d="M16 17H8"></path></svg>
+		case "kanban":
+			<svg class="icon" viewBox="0 0 24 24"><rect width="6" height="14" x="3" y="5" rx="1"></rect><rect width="6" height="8" x="15" y="5" rx="1"></rect><rect width="6" height="11" x="9" y="5" rx="1"></rect></svg>
+		case "timer":
+			<svg class="icon" viewBox="0 0 24 24"><line x1="10" x2="14" y1="2" y2="2"></line><line x1="12" x2="15" y1="14" y2="11"></line><circle cx="12" cy="14" r="8"></circle></svg>
+		case "list":
+			<svg class="icon" viewBox="0 0 24 24"><line x1="8" x2="21" y1="6" y2="6"></line><line x1="8" x2="21" y1="12" y2="12"></line><line x1="8" x2="21" y1="18" y2="18"></line><line x1="3" x2="3.01" y1="6" y2="6"></line><line x1="3" x2="3.01" y1="12" y2="12"></line><line x1="3" x2="3.01" y1="18" y2="18"></line></svg>
+		case "calendar":
+			<svg class="icon" viewBox="0 0 24 24"><path d="M8 2v4"></path><path d="M16 2v4"></path><rect width="18" height="18" x="3" y="4" rx="2"></rect><path d="M3 10h18"></path></svg>
+		default:
+			<svg class="icon" viewBox="0 0 24 24"><path d="M12 2 2 7l10 5 10-5-10-5Z"></path><path d="m2 17 10 5 10-5"></path><path d="m2 12 10 5 10-5"></path></svg>
+	}
+}

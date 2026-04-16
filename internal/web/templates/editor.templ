@@ -1,0 +1,141 @@
+package templates
+
+import (
+	"html/template"
+
+	"github.com/plekt-dev/plekt/internal/editor"
+)
+
+// EditorProps holds configuration for the MarkdownEditor component.
+type EditorProps struct {
+	FieldName    string
+	InitialValue string
+	InitialMode  editor.EditorMode
+	PreviewURL   string
+	CSRFToken    string
+	Required     bool
+}
+
+// MarkdownEditor renders an interactive markdown editor with toolbar and preview tab.
+templ MarkdownEditor(props EditorProps) {
+	<div
+		class="editor-container"
+		data-editor
+		data-field-name={ props.FieldName }
+		data-preview-url={ props.PreviewURL }
+		data-csrf-token={ props.CSRFToken }
+		if props.Required {
+			data-required="true"
+		}
+	>
+		<div class="editor-tabs">
+			<button
+				type="button"
+				class={ "editor-tab", templ.KV("active", props.InitialMode == editor.ModeEdit) }
+				data-tab="write"
+			>Write</button>
+			<button
+				type="button"
+				class={ "editor-tab", templ.KV("active", props.InitialMode == editor.ModePreview) }
+				data-tab="preview"
+			>Preview</button>
+			<button
+				type="button"
+				class={ "editor-tab", templ.KV("active", props.InitialMode == editor.ModeSplit || props.InitialMode == "") }
+				data-tab="split"
+			>Split</button>
+		</div>
+		<div class="editor-toolbar" data-pane="write">
+			<!-- Text formatting -->
+			<select class="editor-toolbar-select" data-insert="heading" title="Heading level">
+				<option value="">H</option>
+				<option value="1">H1</option>
+				<option value="2">H2</option>
+				<option value="3">H3</option>
+				<option value="4">H4</option>
+				<option value="5">H5</option>
+				<option value="6">H6</option>
+			</select>
+			<span class="editor-toolbar-sep"></span>
+			<button type="button" class="editor-toolbar-btn" data-insert="bold" title="Bold (Ctrl+B)">
+				<strong>B</strong>
+			</button>
+			<button type="button" class="editor-toolbar-btn" data-insert="italic" title="Italic (Ctrl+I)">
+				<em>I</em>
+			</button>
+			<button type="button" class="editor-toolbar-btn" data-insert="strikethrough" title="Strikethrough (Ctrl+Shift+X)">
+				<s>S</s>
+			</button>
+			<button type="button" class="editor-toolbar-btn" data-insert="highlight" title="Highlight">
+				<mark>H</mark>
+			</button>
+			<span class="editor-toolbar-sep"></span>
+			<!-- Code -->
+			<button type="button" class="editor-toolbar-btn" data-insert="code" title="Inline code">
+				{ "`" }
+			</button>
+			<button type="button" class="editor-toolbar-btn" data-insert="codeblock" title="Code block">
+				{ "```" }
+			</button>
+			<span class="editor-toolbar-sep"></span>
+			<!-- Links & media -->
+			<button type="button" class="editor-toolbar-btn" data-insert="link" title="Link (Ctrl+K)">
+				&#128279;
+			</button>
+			<button type="button" class="editor-toolbar-btn" data-insert="image" title="Image">
+				&#128247;
+			</button>
+			<span class="editor-toolbar-sep"></span>
+			<!-- Lists -->
+			<button type="button" class="editor-toolbar-btn" data-insert="ul" title="Unordered list">
+				&#8226;&#8212;
+			</button>
+			<button type="button" class="editor-toolbar-btn" data-insert="ol" title="Ordered list">
+				1.
+			</button>
+			<button type="button" class="editor-toolbar-btn" data-insert="tasklist" title="Task list">
+				&#9745;
+			</button>
+			<span class="editor-toolbar-sep"></span>
+			<!-- Blocks -->
+			<button type="button" class="editor-toolbar-btn" data-insert="blockquote" title="Blockquote">
+				&#10077;
+			</button>
+			<button type="button" class="editor-toolbar-btn" data-insert="hr" title="Horizontal rule">
+				&#8213;
+			</button>
+			<button type="button" class="editor-toolbar-btn" data-insert="table" title="Table">
+				&#9638;
+			</button>
+			<span class="editor-toolbar-sep"></span>
+			<!-- Diagrams -->
+			<button type="button" class="editor-toolbar-btn" data-insert="mermaid" title="Mermaid diagram">
+				&#9672;
+			</button>
+			<button type="button" class="editor-toolbar-btn" data-insert="plantuml" title="PlantUML diagram">
+				&#9670;
+			</button>
+		</div>
+		<div class="editor-body" data-editor-body>
+			<textarea
+				name={ props.FieldName }
+				data-field={ props.FieldName }
+				class="form-input editor-textarea"
+				data-pane="write"
+				if props.Required {
+					required
+				}
+			>{ props.InitialValue }</textarea>
+			<div class="editor-preview" data-pane="preview" style="display:none;"></div>
+		</div>
+	</div>
+}
+
+// MarkdownView renders pre-sanitized HTML inside a markdown-body wrapper.
+// The html parameter must be a template.HTML value produced by Renderer.Render,
+// which guarantees sanitization. Using template.HTML enforces this at the type level.
+templ MarkdownView(html template.HTML) {
+	<div class="markdown-body">
+		@templ.Raw(string(html))
+	</div>
+}

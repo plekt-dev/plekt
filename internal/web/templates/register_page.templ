@@ -1,0 +1,45 @@
+package templates
+
+type RegisterPageData struct {
+	CSRFToken         string
+	Error             string
+	PasswordMinLength int
+	ShowSignInLink    bool
+	ShowSetupToken    bool // true when registering the first user (setup token required)
+}
+
+templ RegisterPage(data RegisterPageData) {
+	@AuthLayout(AuthLayoutData{Title: T(ctx, "auth.create_account"), CSRFToken: data.CSRFToken}) {
+		<h1>{ T(ctx, "auth.create_account") }</h1>
+		@AlertError(data.Error)
+		if data.PasswordMinLength > 0 {
+			<p class="text-xs text-muted-foreground mb-4">{ T(ctx, "auth.password_min_length") } { intToString(data.PasswordMinLength) } characters.</p>
+		}
+		<form method="POST" action="/register">
+			<input type="hidden" name="csrf_token" value={ data.CSRFToken }/>
+			<div class="form-group">
+				<label for="username">{ T(ctx, "auth.username") }</label>
+				<input type="text" id="username" name="username" class="form-input" required autocomplete="username"/>
+			</div>
+			<div class="form-group">
+				<label for="password">{ T(ctx, "auth.password") }</label>
+				<input type="password" id="password" name="password" class="form-input" required autocomplete="new-password"/>
+			</div>
+			<div class="form-group">
+				<label for="confirm_password">{ T(ctx, "auth.confirm_password") }</label>
+				<input type="password" id="confirm_password" name="confirm_password" class="form-input" required autocomplete="new-password"/>
+			</div>
+			if data.ShowSetupToken {
+				<div class="form-group">
+					<label for="setup_token">Setup Token</label>
+					<input type="text" id="setup_token" name="setup_token" class="form-input" required autocomplete="off"/>
+					<p class="text-xs text-muted-foreground mt-1">Find this token in server startup logs.</p>
+				</div>
+			}
+			<button type="submit" class="button button-primary w-full">{ T(ctx, "auth.create_account") }</button>
+		</form>
+		if data.ShowSignInLink {
+			<p class="mt-4"><a href="/login">{ T(ctx, "auth.already_have_account") }</a></p>
+		}
+	}
+}

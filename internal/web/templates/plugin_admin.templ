@@ -1,0 +1,876 @@
+package templates
+
+import "github.com/plekt-dev/plekt/internal/loader"
+
+// PluginRowData holds display data for a single plugin row in the list.
+type PluginRowData struct {
+	Name         string
+	Version      string
+	Status       loader.PluginStatus
+	Dir          string
+	ErrorMessage string
+	CSRFToken    string
+}
+
+// PluginListPageData holds all data needed to render the plugin list page.
+type PluginListPageData struct {
+	Plugins           []PluginRowData
+	DiscoveredPlugins []DiscoveredPluginRowData
+	CatalogPlugins    []CatalogPluginData
+	CSRFToken         string
+	LoadError         string
+	LoadDirValue      string
+	ActiveTab         string // "installed", "discovered", "catalog"
+}
+
+// DiscoveredPluginRowData holds display data for a discovered (not yet loaded) plugin.
+type DiscoveredPluginRowData struct {
+	Name          string
+	Version       string
+	Description   string
+	Dir           string
+	ManifestValid bool
+	CSRFToken     string
+}
+
+// CatalogDepData holds display data for a plugin dependency.
+type CatalogDepData struct {
+	Name       string
+	Constraint string
+	Installed  bool // true if this dependency is currently loaded
+	Required   bool // true = hard dep, false = optional
+}
+
+// CatalogVersionData holds display data for a single version in the catalog.
+type CatalogVersionData struct {
+	Version        string
+	MinCoreVersion string
+	Compatible     bool   // true if this version works with running core
+	SizeBytes      int64
+}
+
+// CatalogPluginData holds display data for a plugin in the catalog.
+type CatalogPluginData struct {
+	Name             string
+	Description      string
+	Author           string
+	Signed           bool   // true when the registry entry has a public_key
+	Official         bool   // true when registry plugin entry has official: true (renders "Official" badge)
+	Installed        bool   // true if already installed locally
+	InstalledVersion string // version currently installed
+	UpdateAvail      string // non-empty if a newer compatible version is available
+	Versions         []CatalogVersionData
+	Deps             []CatalogDepData // combined required + optional deps for latest compatible version
+	CoreConstraint   string           // min core version for latest compatible version (e.g. "0.1.0")
+	CoreCompatible   bool             // true if running core satisfies CoreConstraint
+	CSRFToken        string
+}
+
+// PluginDetailPageData holds all data needed to render the plugin detail page.
+type PluginDetailPageData struct {
+	Name             string
+	Version          string
+	Status           loader.PluginStatus
+	Dir              string
+	Description      string
+	Author           string
+	License          string
+	ErrorMessage     string
+	EmitsEvents      []string
+	SubscribesEvents []string
+	MCPTools         []loader.MCPTool
+	MCPResources     []loader.MCPResource
+	CSRFToken        string
+}
+
+// PluginLoadFormData holds data for the plugin load form fragment.
+type PluginLoadFormData struct {
+	CSRFToken string
+	Error     string
+	DirValue  string
+}
+
+// pluginActiveTab returns the effective active tab, defaulting to "installed".
+func pluginActiveTab(tab string) string {
+	if tab == "discovered" || tab == "catalog" {
+		return tab
+	}
+	return "installed"
+}
+
+// PluginListPage renders the full plugin list page.
+templ PluginListPage(data PluginListPageData) {
+	@BaseLayout(BaseLayoutData{Title: "Plugins", CSRFToken: data.CSRFToken, ActivePage: "plugins"}) {
+		@PageHeader(T(ctx, "plugins.code"), T(ctx, "plugins.title"), T(ctx, "plugins.subtitle"))
+		<div class="plugin-tabs">
+			<button
+				class={ "plugin-tab", templ.KV("active", pluginActiveTab(data.ActiveTab) == "installed") }
+				data-tab="installed"
+			>{ T(ctx, "catalog.tab_installed") } ({ itoa(len(data.Plugins)) })</button>
+			<button
+				class={ "plugin-tab", templ.KV("active", pluginActiveTab(data.ActiveTab) == "discovered") }
+				data-tab="discovered"
+			>{ T(ctx, "catalog.tab_discovered") } ({ itoa(len(data.DiscoveredPlugins)) })</button>
+			<button
+				class={ "plugin-tab", templ.KV("active", pluginActiveTab(data.ActiveTab) == "catalog") }
+				data-tab="catalog"
+			>{ T(ctx, "catalog.tab_catalog") } ({ itoa(len(data.CatalogPlugins)) })</button>
+		</div>
+		<div class="plugin-tab-content" id="tab-installed" style={ templ.SafeCSS(tabDisplay(pluginActiveTab(data.ActiveTab) == "installed")) }>
+			@CardPlain() {
+				<table class="table">
+					<thead>
+						<tr>
+							<th>{ T(ctx, "plugins.name") }</th>
+							<th>{ T(ctx, "plugins.version") }</th>
+							<th>{ T(ctx, "plugins.status") }</th>
+							<th>{ T(ctx, "plugins.directory") }</th>
+							<th>{ T(ctx, "plugins.actions") }</th>
+						</tr>
+					</thead>
+					<tbody id="plugin-list">
+						for _, p := range data.Plugins {
+							@PluginRow(p)
+						}
+					</tbody>
+				</table>
+			}
+			@PluginLoadForm(PluginLoadFormData{
+				CSRFToken: data.CSRFToken,
+				Error:     data.LoadError,
+				DirValue:  data.LoadDirValue,
+			})
+		</div>
+		<div class="plugin-tab-content" id="tab-discovered" style={ templ.SafeCSS(tabDisplay(pluginActiveTab(data.ActiveTab) == "discovered")) }>
+			@DiscoveredPluginSection(data.DiscoveredPlugins, data.CSRFToken)
+		</div>
+		<div class="plugin-tab-content" id="tab-catalog" style={ templ.SafeCSS(tabDisplay(pluginActiveTab(data.ActiveTab) == "catalog")) }>
+			@CatalogSection(data.CatalogPlugins)
+		</div>
+		@pluginTabScript()
+		@catalogInstallScript()
+		@pluginInstallPermissionsScript()
+	}
+}
+
+// tabDisplay returns the CSS display property for a tab content pane.
+func tabDisplay(active bool) string {
+	if active {
+		return "display:block"
+	}
+	return "display:none"
+}
+
+// pluginTabScript injects client-side tab switching logic.
+templ pluginTabScript() {
+	<script>
+	(function(){
+		document.querySelectorAll('.plugin-tab').forEach(function(tab) {
+			tab.addEventListener('click', function() {
+				document.querySelectorAll('.plugin-tab').forEach(function(t) { t.classList.remove('active'); });
+				document.querySelectorAll('.plugin-tab-content').forEach(function(c) { c.style.display = 'none'; });
+				tab.classList.add('active');
+				document.getElementById('tab-' + tab.dataset.tab).style.display = 'block';
+			});
+		});
+	})();
+	</script>
+}
+
+// CatalogSection renders the catalog grid of remote registry plugins.
+templ CatalogSection(plugins []CatalogPluginData) {
+	if len(plugins) == 0 {
+		<p class="text-muted-foreground text-sm">{ T(ctx, "catalog.empty") }</p>
+	} else {
+		<div class="catalog-grid">
+			for _, p := range plugins {
+				@CatalogCard(p)
+			}
+		</div>
+	}
+}
+
+// catalogLatestCompatible returns the first compatible version string, or "" if none.
+func catalogLatestCompatible(versions []CatalogVersionData) string {
+	for _, v := range versions {
+		if v.Compatible {
+			return v.Version
+		}
+	}
+	return ""
+}
+
+// catalogLatestVersion returns the first version string (newest).
+func catalogLatestVersion(versions []CatalogVersionData) string {
+	if len(versions) > 0 {
+		return versions[0].Version
+	}
+	return ""
+}
+
+// catalogHasAnyCompatible returns true if at least one version is compatible.
+func catalogHasAnyCompatible(versions []CatalogVersionData) bool {
+	for _, v := range versions {
+		if v.Compatible {
+			return true
+		}
+	}
+	return false
+}
+
+// formatSizeKB formats bytes as "123 KB".
+func formatSizeKB(b int64) string {
+	if b <= 0 {
+		return ""
+	}
+	kb := (b + 512) / 1024
+	return itoa(int(kb)) + " KB"
+}
+
+// CatalogCard renders a single plugin card in the catalog.
+templ CatalogCard(p CatalogPluginData) {
+	<div class={ "catalog-card", templ.KV("catalog-card-incompatible", !catalogHasAnyCompatible(p.Versions)) }>
+		<div class="catalog-card-header">
+			<span class="catalog-card-name">{ p.Name }</span>
+			<span class="catalog-card-version">{ catalogLatestVersion(p.Versions) }</span>
+		</div>
+		if p.Author != "" {
+			<span class="catalog-card-author">{ p.Author }</span>
+		}
+		<p class="catalog-card-desc">{ p.Description }</p>
+		<!-- Version history -->
+		<div class="catalog-card-versions">
+			for _, v := range p.Versions {
+				<div class={ "catalog-version-row", templ.KV("catalog-version-incompatible", !v.Compatible) }>
+					<span class="catalog-version-num">{ v.Version }</span>
+					if v.SizeBytes > 0 {
+						<span class="catalog-version-size">{ formatSizeKB(v.SizeBytes) }</span>
+					}
+					if !v.Compatible {
+						@Badge("incompatible", "badge-error")
+					} else if p.Installed && p.InstalledVersion == v.Version {
+						@Badge("installed", "badge-active")
+					}
+				</div>
+			}
+		</div>
+		<!-- Requirements: core + plugin deps -->
+		<div class="catalog-card-deps">
+			if p.CoreConstraint != "" {
+				<div class="catalog-dep-row">
+					if p.CoreCompatible {
+						<span class="catalog-dep-status catalog-dep-ok">✓</span>
+					} else {
+						<span class="catalog-dep-status catalog-dep-missing">✗</span>
+					}
+					<span class="catalog-dep-name">plekt-core</span>
+					<span class="catalog-dep-constraint">≥{ p.CoreConstraint }</span>
+					<span class="catalog-dep-type">required</span>
+				</div>
+			}
+			for _, d := range p.Deps {
+				<div class="catalog-dep-row">
+					if d.Installed {
+						<span class="catalog-dep-status catalog-dep-ok">✓</span>
+					} else {
+						<span class="catalog-dep-status catalog-dep-missing">✗</span>
+					}
+					<span class="catalog-dep-name">{ d.Name }</span>
+					if d.Constraint != "" {
+						<span class="catalog-dep-constraint">{ d.Constraint }</span>
+					}
+					if d.Required {
+						<span class="catalog-dep-type">required</span>
+					} else {
+						<span class="catalog-dep-type">optional</span>
+					}
+				</div>
+			}
+		</div>
+		<div class="catalog-card-footer">
+			if p.Official {
+				@Badge(T(ctx, "catalog.official"), "badge-active")
+			} else if p.Author != "" {
+				@Badge(p.Author, "")
+			} else {
+				@Badge(T(ctx, "catalog.community"), "")
+			}
+			if !catalogHasAnyCompatible(p.Versions) {
+				<button class="button button-ghost" disabled>{ T(ctx, "catalog.incompatible") }</button>
+			} else if p.Installed && p.UpdateAvail == "" {
+				<button class="button button-ghost" disabled>{ T(ctx, "catalog.installed") }</button>
+			} else if p.UpdateAvail != "" {
+				@catalogInstallForm(p, T(ctx, "catalog.update")+" "+p.UpdateAvail)
+			} else {
+				@catalogInstallForm(p, T(ctx, "catalog.install"))
+			}
+		</div>
+	</div>
+}
+
+// catalogInstallForm renders the install/update form with progress indicator.
+templ catalogInstallForm(p CatalogPluginData, label string) {
+	if p.Signed {
+		<form class="catalog-install-form" action="/admin/plugins/install-remote" method="post">
+			<input type="hidden" name="csrf_token" value={ p.CSRFToken }/>
+			<input type="hidden" name="name" value={ p.Name }/>
+			<button type="submit" class="button button-primary catalog-install-btn">{ label }</button>
+			<div class="catalog-install-progress"><div class="catalog-progress-bar"><div class="catalog-progress-fill"></div></div></div>
+		</form>
+	} else {
+		<form class="catalog-install-form" action="/admin/plugins/install-remote" method="post" data-unsigned="1">
+			<input type="hidden" name="csrf_token" value={ p.CSRFToken }/>
+			<input type="hidden" name="name" value={ p.Name }/>
+			<button
+				type="button"
+				class="button button-primary catalog-install-btn"
+				onclick="MC.confirm({title:'Unsigned plugin',message:'This plugin is not signed. Install anyway?',okText:'Install',danger:true}).then(function(ok){if(ok)this.closest('form').requestSubmit();}.bind(this));"
+			>{ label }</button>
+			<div class="catalog-install-progress"><div class="catalog-progress-bar"><div class="catalog-progress-fill"></div></div></div>
+		</form>
+	}
+}
+
+// catalogInstallScript handles catalog install as a two-step flow:
+// 1. POST install-remote → downloads + unpacks (no load) → returns {dir, name, version}
+// 2. GET /admin/plugins/inspect?dir=... → permissions dialog
+// 3. POST /admin/plugins/load with dir + granted_hosts → loads plugin
+templ catalogInstallScript() {
+	<script>
+	(function(){
+		// Show loading state on local load buttons (Discovered tab).
+		document.body.addEventListener('htmx:beforeRequest', function(e) {
+			var form = e.detail.elt;
+			if (!form.matches || !form.matches('form[hx-post="/admin/plugins/load"]')) return;
+			var btn = form.querySelector('button[type="submit"]');
+			if (btn) { btn.disabled = true; btn.textContent = 'Loading…'; btn.style.opacity = '0.4'; }
+		});
+		document.body.addEventListener('htmx:afterRequest', function(e) {
+			var form = e.detail.elt;
+			if (!form.matches || !form.matches('form[hx-post="/admin/plugins/load"]')) return;
+			var btn = form.querySelector('button[type="submit"]');
+			if (!e.detail.successful && btn) {
+				btn.disabled = false; btn.textContent = 'Load'; btn.style.opacity = '1';
+				var msg = e.detail.xhr && e.detail.xhr.responseText ? e.detail.xhr.responseText.trim() : 'Failed to load plugin';
+				MC.confirm({ title: 'Error', message: msg, okText: 'OK', cancelText: '', danger: false });
+			}
+		});
+
+		// Intercept catalog install forms : do NOT let htmx handle them.
+		document.body.addEventListener('submit', function(e) {
+			var form = e.target;
+			if (!form.classList || !form.classList.contains('catalog-install-form')) return;
+			e.preventDefault();
+			e.stopPropagation();
+			catalogInstall(form);
+		}, true);
+
+		function catalogInstall(form) {
+			var btn = form.querySelector('.catalog-install-btn');
+			var prog = form.querySelector('.catalog-install-progress');
+			var originalText = btn ? btn.textContent : '';
+
+			// Step 1: download + unpack
+			if (btn) { btn.disabled = true; btn.style.opacity = '0.4'; }
+			setProgress(prog, 'Downloading…', 0);
+
+			var fd = new FormData(form);
+			fetch(form.action || '/admin/plugins/install-remote', {
+				method: 'POST',
+				body: fd,
+				credentials: 'same-origin',
+			}).then(function(r) {
+				if (!r.ok) return r.text().then(function(t){ throw new Error(t || 'HTTP ' + r.status); });
+				return r.json();
+			}).then(function(data) {
+				setProgress(prog, 'Downloaded. Reviewing permissions…', 50);
+
+				// Step 2: inspect permissions
+				return fetch('/admin/plugins/inspect?dir=' + encodeURIComponent(data.dir), {
+					headers: { 'Accept': 'application/json' },
+					credentials: 'same-origin',
+				}).then(function(r) {
+					if (!r.ok) {
+						// No inspect endpoint or error : load directly without permissions.
+						setProgress(prog, 'Loading plugin…', 75);
+						return loadPlugin(data.dir, [], prog);
+					}
+					return r.json().then(function(inspectData) {
+						// Step 3: show permissions dialog
+						return new Promise(function(resolve, reject) {
+							if (typeof showPermissionsDialog === 'function') {
+								showPermissionsDialog(inspectData, function(hosts) {
+									setProgress(prog, 'Loading plugin…', 75);
+									resolve(loadPlugin(data.dir, hosts, prog));
+								}, function() {
+									// User cancelled : delete the downloaded plugin and reset UI.
+									deletePlugin(data.dir);
+									reject(new Error('__cancelled__'));
+								});
+							} else {
+								setProgress(prog, 'Loading plugin…', 75);
+								resolve(loadPlugin(data.dir, [], prog));
+							}
+						});
+					});
+				});
+			}).then(function() {
+				setProgress(prog, 'Installed!', 100);
+				setTimeout(function(){ window.location.href = '/admin/plugins?tab=catalog'; }, 500);
+			}).catch(function(err) {
+				if (err && err.message === '__cancelled__') {
+					// User cancelled : reset to initial state.
+					if (btn) { btn.disabled = false; btn.textContent = originalText; btn.style.opacity = '1'; }
+					if (prog) { prog.classList.remove('active'); }
+					return;
+				}
+				if (btn) { btn.disabled = false; btn.textContent = 'Retry'; btn.style.opacity = '1'; }
+				setProgress(prog, 'Error: ' + err.message, -1);
+			});
+		}
+
+		function deletePlugin(dir) {
+			var csrfInput = document.querySelector('input[name="csrf_token"]');
+			var fd = new FormData();
+			fd.append('dir', dir);
+			if (csrfInput) fd.append('csrf_token', csrfInput.value);
+			fetch('/admin/plugins/delete', {
+				method: 'POST',
+				body: fd,
+				credentials: 'same-origin',
+			}).catch(function(){}); // best-effort cleanup
+		}
+
+		function loadPlugin(dir, grantedHosts, prog) {
+			var fd = new FormData();
+			fd.append('dir', dir);
+			// Get CSRF token from the page.
+			var csrfInput = document.querySelector('input[name="csrf_token"]');
+			if (csrfInput) fd.append('csrf_token', csrfInput.value);
+			(grantedHosts || []).forEach(function(h){ fd.append('granted_hosts[]', h); });
+
+			return fetch('/admin/plugins/load', {
+				method: 'POST',
+				body: fd,
+				credentials: 'same-origin',
+			}).then(function(r) {
+				if (!r.ok) return r.text().then(function(t){ throw new Error(t || 'Load failed'); });
+			});
+		}
+
+		function setProgress(el, text, pct) {
+			if (!el) return;
+			el.classList.add('active');
+			// Set text on first text node, keep bar div intact.
+			var textNode = el.firstChild;
+			if (!textNode || textNode.nodeType !== 3) {
+				textNode = document.createTextNode('');
+				el.insertBefore(textNode, el.firstChild);
+			}
+			if (pct < 0) {
+				el.style.color = 'hsl(var(--destructive))';
+				textNode.textContent = text;
+				var fill = el.querySelector('.catalog-progress-fill');
+				if (fill) fill.style.width = '100%';
+				if (fill) fill.style.background = 'hsl(var(--destructive))';
+				return;
+			}
+			textNode.textContent = text + ' ';
+			var fill = el.querySelector('.catalog-progress-fill');
+			if (fill) fill.style.width = pct + '%';
+		}
+	})();
+	</script>
+}
+
+// pluginInstallPermissionsScript injects a small client-side interceptor that
+// turns every `.plugin-install-form` submission into a two-step flow:
+//
+//  1. GET /admin/plugins/inspect?dir=... : fetch manifest + derived permissions
+//  2. Show a mc-dialog with the capability summary and a checkbox per
+//     requested network host (default: all checked).
+//  3. On confirm, resubmit the original form WITH granted_hosts[] values added.
+//
+// Reuses the mc-dialog CSS class so the dialog matches MC.confirm styling.
+templ pluginInstallPermissionsScript() {
+	<script>
+	(function(){
+	  function esc(s){ return (s==null?'':String(s)).replace(/[&<>"']/g, function(c){
+	    return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];
+	  }); }
+
+	  // Exposed globally so catalogInstallScript can reuse it.
+	  window.showPermissionsDialog = showPermissionsDialog;
+	  function showPermissionsDialog(data, onConfirm, onCancel){
+	    var existing = document.getElementById('mc-confirm-dialog');
+	    if (existing) existing.remove();
+	    var dialog = document.createElement('dialog');
+	    dialog.id = 'mc-confirm-dialog';
+	    dialog.className = 'mc-dialog mc-confirm-dialog';
+	    var caps = (data.permissions && data.permissions.Capabilities) || [];
+	    var capsHtml = '';
+	    caps.forEach(function(c){
+	      var sev = c.Severity || 'low';
+	      var variant = sev === 'high' ? 'badge-error' : (sev === 'medium' ? 'badge-loading' : 'badge-active');
+	      capsHtml += '<div style="padding:0.5rem; border:1px solid var(--border); border-radius:4px; margin-bottom:0.5rem;">'
+	        + '<div style="display:flex;align-items:center;gap:0.5rem;"><span class="badge ' + variant + '">' + esc(sev) + '</span>'
+	        + '<strong>' + esc(c.Title) + '</strong></div>'
+	        + '<div style="font-size:11px;color:var(--muted-foreground);margin-top:0.25rem;">' + esc(c.Description) + '</div>';
+	      if (c.Details && c.Details.length) {
+	        capsHtml += '<ul style="font-family:var(--font-mono);font-size:11px;padding-left:1rem;margin-top:0.25rem;">';
+	        c.Details.forEach(function(d){ capsHtml += '<li>' + esc(d) + '</li>'; });
+	        capsHtml += '</ul>';
+	      }
+	      capsHtml += '</div>';
+	    });
+
+	    var hostsHtml = '';
+	    var requested = data.requested_hosts || [];
+	    if (requested.length) {
+	      hostsHtml = '<div style="margin-top:0.75rem;"><strong style="font-size:13px;">Network hosts requested:</strong><div style="margin-top:0.5rem;">';
+	      requested.forEach(function(h, i){
+	        hostsHtml += '<label style="display:block;font-family:var(--font-mono);font-size:11px;padding:0.25rem 0;">'
+	          + '<input type="checkbox" name="granted_hosts[]" value="' + esc(h) + '" checked data-host-checkbox /> '
+	          + esc(h) + '</label>';
+	      });
+	      hostsHtml += '</div></div>';
+	    }
+
+	    dialog.innerHTML = ''
+	      + '<div class="mc-confirm-content" style="max-width:640px;">'
+	      +   '<h3 class="mc-confirm-title">Install ' + esc(data.manifest && data.manifest.name) + ' ' + esc(data.manifest && data.manifest.version) + '?</h3>'
+	      +   '<p class="mc-confirm-message">Review the permissions below before installing.</p>'
+	      +   '<div style="max-height:50vh;overflow-y:auto;margin-top:0.5rem;">' + capsHtml + hostsHtml + '</div>'
+	      +   '<div class="mc-confirm-actions" style="margin-top:0.75rem;">'
+	      +     '<button class="button button-ghost mc-confirm-cancel">Cancel</button>'
+	      +     '<button class="button button-primary mc-confirm-ok">Install with these permissions</button>'
+	      +   '</div>'
+	      + '</div>';
+	    document.body.appendChild(dialog);
+	    if (typeof dialog.showModal === 'function') dialog.showModal();
+
+	    function close(){ try { dialog.close(); } catch(e){} dialog.remove(); }
+	    dialog.querySelector('.mc-confirm-cancel').addEventListener('click', function(){ close(); if (onCancel) onCancel(); });
+	    dialog.querySelector('.mc-confirm-ok').addEventListener('click', function(){
+	      var hosts = Array.prototype.slice.call(dialog.querySelectorAll('[data-host-checkbox]:checked'))
+	        .map(function(cb){ return cb.value; });
+	      close();
+	      onConfirm(hosts);
+	    });
+	  }
+
+	  function intercept(form){
+	    if (form.dataset.permIntercepted === '1') return;
+	    form.dataset.permIntercepted = '1';
+	    form.addEventListener('submit', function(e){
+	      if (form.dataset.permApproved === '1') return; // second submit
+	      e.preventDefault();
+	      e.stopPropagation();
+	      var dirInput = form.querySelector('input[name="dir"]');
+	      var dir = dirInput ? dirInput.value : '';
+	      if (!dir) { form.submit(); return; }
+	      fetch('/admin/plugins/inspect?dir=' + encodeURIComponent(dir), {
+	        headers: { 'Accept': 'application/json' },
+	        credentials: 'same-origin',
+	      }).then(function(r){
+	        if (!r.ok) return r.json().then(function(j){ throw new Error((j && j.error) || 'inspect failed'); });
+	        return r.json();
+	      }).then(function(data){
+	        showPermissionsDialog(data, function(hosts){
+	          // Remove any prior granted_hosts inputs, then add the chosen ones.
+	          form.querySelectorAll('input[name="granted_hosts[]"]').forEach(function(n){ n.remove(); });
+	          hosts.forEach(function(h){
+	            var i = document.createElement('input');
+	            i.type = 'hidden'; i.name = 'granted_hosts[]'; i.value = h;
+	            form.appendChild(i);
+	          });
+	          form.dataset.permApproved = '1';
+	          // htmx-aware re-submit:
+	          // - htmx.ajax fires the actual XHR with the chosen hx-target/hx-swap
+	          //   and runs htmx response processing. Plain form.submit() bypasses
+	          //   submit listeners entirely; htmx.trigger() only fires custom events.
+	          if (window.htmx && form.getAttribute('hx-post')) {
+	            try {
+	              window.htmx.ajax('POST', form.getAttribute('hx-post'), {
+	                source: form,
+	                target: form.getAttribute('hx-target') || form,
+	                swap: form.getAttribute('hx-swap') || 'innerHTML',
+	                values: new FormData(form),
+	              });
+	            } catch (e) {
+	              console.error('[plugin-admin] htmx.ajax failed:', e);
+	              form.requestSubmit ? form.requestSubmit() : form.submit();
+	            }
+	          } else if (form.requestSubmit) {
+	            // requestSubmit fires a real submit event (so capture listeners
+	            // see permApproved=1 and let it through), unlike form.submit().
+	            form.requestSubmit();
+	          } else {
+	            form.submit();
+	          }
+	        });
+	      }).catch(function(err){
+	        if (window.MC && MC.confirm) {
+	          MC.confirm({ title: 'Inspect failed', message: err.message || 'Could not inspect plugin', okText: 'OK', cancelText: 'Close', danger: false });
+	        }
+	      });
+	    }, true);
+	  }
+
+	  function scan(root){
+	    (root || document).querySelectorAll('form[hx-post="/admin/plugins/load"]').forEach(intercept);
+	  }
+	  if (document.readyState === 'loading') {
+	    document.addEventListener('DOMContentLoaded', function(){ scan(); });
+	  } else {
+	    scan();
+	  }
+	  // Re-scan after htmx swaps.
+	  document.body.addEventListener('htmx:afterSwap', function(){ scan(); });
+	})();
+	</script>
+}
+
+// DiscoveredPluginSection renders the "Discovered Plugins" section showing plugins
+// found on disk that are not yet loaded.
+templ DiscoveredPluginSection(plugins []DiscoveredPluginRowData, csrfToken string) {
+	<div class="mt-4">
+		@Card(T(ctx, "plugins.discovered")) {
+			if len(plugins) == 0 {
+				<p class="text-muted-foreground text-sm">{ T(ctx, "plugins.all_loaded") }</p>
+			} else {
+				<table class="table">
+					<thead>
+						<tr>
+							<th>{ T(ctx, "plugins.name") }</th>
+							<th>{ T(ctx, "plugins.version") }</th>
+							<th>{ T(ctx, "plugins.description") }</th>
+							<th>{ T(ctx, "plugins.directory") }</th>
+							<th>{ T(ctx, "plugins.actions") }</th>
+						</tr>
+					</thead>
+					<tbody>
+						for _, p := range plugins {
+							@DiscoveredPluginRow(p)
+						}
+					</tbody>
+				</table>
+			}
+		}
+	</div>
+}
+
+// DiscoveredPluginRow renders a single row for a discovered (unloaded) plugin.
+templ DiscoveredPluginRow(data DiscoveredPluginRowData) {
+	<tr>
+		<td>{ data.Name }</td>
+		<td class="font-mono text-xs">{ data.Version }</td>
+		<td class="text-muted-foreground text-sm">{ data.Description }</td>
+		<td class="font-mono text-xs truncate" style="max-width: 200px;">{ data.Dir }</td>
+		<td>
+			<div class="flex gap-2 items-center">
+				if data.ManifestValid {
+					<form hx-post="/admin/plugins/load" hx-target="#plugin-list" hx-swap="innerHTML">
+						<input type="hidden" name="csrf_token" value={ data.CSRFToken }/>
+						<input type="hidden" name="dir" value={ data.Dir }/>
+						<button type="submit" class="button button-primary">{ T(ctx, "plugins.load") }</button>
+					</form>
+				} else {
+					@Badge("invalid manifest", "badge-error")
+				}
+				<form hx-post="/admin/plugins/delete" hx-target="closest tr" hx-swap="outerHTML">
+					<input type="hidden" name="csrf_token" value={ data.CSRFToken }/>
+					<input type="hidden" name="dir" value={ data.Dir }/>
+					<button
+						type="button"
+						class="button button-danger"
+						onclick="var f=this.closest('form');MC.confirm({title:'Delete plugin',message:'Delete from disk? This cannot be undone.',okText:'Delete',danger:true}).then(function(ok){if(ok)f.requestSubmit();});"
+					>{ T(ctx, "plugins.delete") }</button>
+				</form>
+			</div>
+		</td>
+	</tr>
+}
+
+// PluginRow renders a single plugin row in the plugin table.
+// The CSRF token is embedded via hx-vals on the <tr> to avoid the duplicate
+// hidden-input problem when multiple rows share the same [name='csrf_token'] selector.
+templ PluginRow(data PluginRowData) {
+	<tr hx-vals={ JSONCSRFToken(data.CSRFToken) }>
+		<td><a href={ templ.SafeURL("/admin/plugins/" + data.Name) }>{ data.Name }</a></td>
+		<td class="font-mono text-xs">{ data.Version }</td>
+		<td>
+			if data.Status == "active" {
+				@Badge("active", "badge-active")
+			} else if data.Status == "error" {
+				@Badge("error", "badge-error")
+			} else if data.Status == "loading" {
+				@Badge("loading", "badge-loading")
+			} else if data.Status == "unloading" {
+				@Badge("unloading", "badge-unloading")
+			} else {
+				@Badge(string(data.Status), "")
+			}
+			if data.ErrorMessage != "" {
+				<span class="text-xs text-destructive ml-1">{ data.ErrorMessage }</span>
+			}
+		</td>
+		<td class="font-mono text-xs truncate" style="max-width: 200px;">{ data.Dir }</td>
+		<td>
+			<div class="flex gap-2">
+				<a
+					class="button button-ghost"
+					href={ templ.SafeURL("/admin/plugins/" + data.Name + "/permissions") }
+				>Permissions</a>
+				<button
+					class="button button-primary"
+					hx-post={ "/admin/plugins/" + data.Name + "/reload" }
+					hx-target="closest tr"
+					hx-swap="outerHTML"
+				>{ T(ctx, "plugins.reload") }</button>
+				<button
+					class="button button-danger"
+					hx-post={ "/admin/plugins/" + data.Name + "/unload" }
+					hx-target="closest tr"
+					hx-swap="outerHTML"
+				>{ T(ctx, "plugins.unload") }</button>
+			</div>
+		</td>
+	</tr>
+}
+
+// PluginDetailPage renders the full plugin detail page.
+templ PluginDetailPage(data PluginDetailPageData) {
+	@BaseLayout(BaseLayoutData{Title: "Plugin : " + data.Name, CSRFToken: data.CSRFToken, ActivePage: "plugins"}) {
+		<a class="back-link" href="/admin/plugins">{ T(ctx, "plugins.back_to_plugins") }</a>
+		@PageHeader(T(ctx, "plugins.code"), data.Name, data.Description)
+		@Card(T(ctx, "plugins.plugin_info")) {
+			<dl class="dl-grid">
+				<dt>{ T(ctx, "plugins.name") }</dt>
+				<dd>{ data.Name }</dd>
+				<dt>{ T(ctx, "plugins.version") }</dt>
+				<dd class="font-mono text-xs">{ data.Version }</dd>
+				<dt>{ T(ctx, "plugins.status") }</dt>
+				<dd>
+					if data.Status == "active" {
+						@Badge("active", "badge-active")
+					} else if data.Status == "error" {
+						@Badge("error", "badge-error")
+					} else {
+						@Badge(string(data.Status), "")
+					}
+				</dd>
+				<dt>{ T(ctx, "plugins.directory") }</dt>
+				<dd class="font-mono text-xs">{ data.Dir }</dd>
+				if data.Author != "" {
+					<dt>{ T(ctx, "plugins.author") }</dt>
+					<dd>{ data.Author }</dd>
+				}
+				if data.License != "" {
+					<dt>{ T(ctx, "plugins.license") }</dt>
+					<dd>{ data.License }</dd>
+				}
+			</dl>
+			if data.ErrorMessage != "" {
+				<p class="text-destructive mt-3">{ data.ErrorMessage }</p>
+			}
+		}
+		if len(data.EmitsEvents) > 0 || len(data.SubscribesEvents) > 0 {
+			@Card(T(ctx, "plugins.events")) {
+				if len(data.EmitsEvents) > 0 {
+					<div class="mb-4">
+						<span class="text-xs font-semibold text-nerve-steel uppercase tracking-wider">{ T(ctx, "plugins.emits") }</span>
+						<div class="flex flex-wrap gap-2 mt-1">
+							for _, e := range data.EmitsEvents {
+								@Badge(e, "")
+							}
+						</div>
+					</div>
+				}
+				if len(data.SubscribesEvents) > 0 {
+					<div>
+						<span class="text-xs font-semibold text-nerve-steel uppercase tracking-wider">{ T(ctx, "plugins.subscribes") }</span>
+						<div class="flex flex-wrap gap-2 mt-1">
+							for _, e := range data.SubscribesEvents {
+								@Badge(e, "")
+							}
+						</div>
+					</div>
+				}
+			}
+		}
+		if len(data.MCPTools) > 0 {
+			@Card(T(ctx, "plugins.mcp_tools")) {
+				<table class="table">
+					<thead>
+						<tr>
+							<th>{ T(ctx, "plugins.name") }</th>
+							<th>{ T(ctx, "plugins.description") }</th>
+						</tr>
+					</thead>
+					<tbody>
+						for _, tool := range data.MCPTools {
+							<tr>
+								<td class="font-mono text-xs">{ tool.Name }</td>
+								<td class="text-muted-foreground">{ tool.Description }</td>
+							</tr>
+						}
+					</tbody>
+				</table>
+			}
+		}
+		if len(data.MCPResources) > 0 {
+			@Card(T(ctx, "plugins.mcp_resources")) {
+				<table class="table">
+					<thead>
+						<tr>
+							<th>{ T(ctx, "plugins.uri") }</th>
+							<th>{ T(ctx, "plugins.name") }</th>
+							<th>{ T(ctx, "plugins.description") }</th>
+						</tr>
+					</thead>
+					<tbody>
+						for _, res := range data.MCPResources {
+							<tr>
+								<td class="font-mono text-xs">{ res.URI }</td>
+								<td>{ res.Name }</td>
+								<td class="text-muted-foreground">{ res.Description }</td>
+							</tr>
+						}
+					</tbody>
+				</table>
+			}
+		}
+	}
+}
+
+// PluginLoadForm renders the plugin load form fragment.
+// Used both for initial render and for htmx partial re-render on error.
+templ PluginLoadForm(data PluginLoadFormData) {
+	<div id="plugin-load-form" class="mt-4">
+		@Card(T(ctx, "plugins.load_plugin")) {
+			<form
+				hx-post="/admin/plugins/load"
+				hx-target="#plugin-load-form"
+				hx-swap="outerHTML"
+			>
+				<input type="hidden" name="csrf_token" value={ data.CSRFToken }/>
+				<div class="form-row">
+					<div class="form-group">
+						<label for="plugin-dir">{ T(ctx, "plugins.plugin_directory") }</label>
+						<input
+							type="text"
+							id="plugin-dir"
+							name="dir"
+							value={ data.DirValue }
+							placeholder="/path/to/plugin"
+							class="form-input"
+						/>
+					</div>
+					<button type="submit" class="button button-primary">{ T(ctx, "plugins.load") }</button>
+				</div>
+				@AlertError(data.Error)
+			</form>
+		}
+	</div>
+}

@@ -1,0 +1,153 @@
+package templates
+
+import (
+	"fmt"
+	"html/template"
+	"strconv"
+)
+
+// ProjectDetailTask is a lightweight task record for the project detail view.
+type ProjectDetailTask struct {
+	ID       int64  `json:"id"`
+	Title    string `json:"title"`
+	Status   string `json:"status"`
+	Priority int    `json:"priority"`
+}
+
+// ProjectDetailSession is a lightweight session record for the project detail view.
+type ProjectDetailSession struct {
+	ID          int64  `json:"id"`
+	SessionType string `json:"session_type"`
+	StartedAt   string `json:"started_at"`
+	EndedAt     string `json:"ended_at,omitempty"`
+}
+
+// ProjectDetailPageData holds all data needed to render the project detail page.
+type ProjectDetailPageData struct {
+	CSRFToken              string
+	ActivePage             string
+	ProjectID              int64
+	ProjectName            string
+	ProjectDescription     string
+	RenderedDescription    template.HTML // pre-sanitized HTML; if empty falls back to plain text
+	ProjectColor           string
+	ProjectImage           string
+	ProjectStatus          string
+	ProjectCreatedAt       string
+	ProjectUpdatedAt       string
+	RecentTasks            []ProjectDetailTask    // nil if tasks-plugin not loaded
+	TodaySessions          []ProjectDetailSession // nil if pomodoro-plugin not loaded
+	Error                  string
+}
+
+// ProjectDetailPage renders the project detail view.
+templ ProjectDetailPage(data ProjectDetailPageData) {
+	@BaseLayout(BaseLayoutData{Title: data.ProjectName, CSRFToken: data.CSRFToken, ActivePage: data.ActivePage}) {
+		if data.Error != "" {
+			@PageHeader("SN—PRJ", "Project", "projects-plugin")
+			@AlertError(data.Error)
+		} else {
+			<div class="mb-8 animate-reveal">
+				<span class="text-xs font-mono text-primary uppercase tracking-widest mb-1 block">SN—PRJ</span>
+				<div class="flex items-center gap-3">
+					if data.ProjectImage != "" {
+						<img src={ data.ProjectImage } width="32" height="32" style="border-radius: var(--radius); flex-shrink: 0;"/>
+					} else {
+						<div style={ "width: 32px; height: 32px; border-radius: var(--radius); background-color: " + data.ProjectColor + "; flex-shrink: 0; display: flex; align-items: center; justify-content: center; color: #fff; font-weight: 700; font-size: 0.875rem;" }>{ string([]rune(data.ProjectName)[:1]) }</div>
+					}
+					<h1 class="text-2xl font-bold text-nerve-bone tracking-tight" style={ "border-bottom: 2px solid " + data.ProjectColor }>{ data.ProjectName }</h1>
+					if data.ProjectStatus == "archived" {
+						<span class="badge">Archived</span>
+					}
+				</div>
+				if data.RenderedDescription != "" {
+					<div class="text-sm text-muted-foreground mt-1">
+						@MarkdownView(data.RenderedDescription)
+					</div>
+				} else if data.ProjectDescription != "" {
+					<p class="text-sm text-muted-foreground mt-1">{ data.ProjectDescription }</p>
+				}
+			</div>
+			<div class="flex items-center gap-4 mb-6 animate-reveal">
+				if data.RecentTasks != nil {
+					<span class="text-sm text-nerve-steel">
+						{ strconv.Itoa(countOpenTasks(data.RecentTasks)) } open tasks
+					</span>
+				}
+				<a href="/p/projects-plugin/projects" class="button button-ghost" style="font-size: 0.75rem;">Manage Projects</a>
+			</div>
+			if data.RecentTasks != nil {
+				@Card("Recent Tasks") {
+					if len(data.RecentTasks) == 0 {
+						<p class="text-sm text-muted-foreground">No tasks yet.</p>
+					} else {
+						<table style="width: 100%; border-collapse: collapse;">
+							<thead>
+								<tr>
+									<th style="text-align: left; padding: 0.5rem 0; font-size: 0.75rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted-foreground);">Title</th>
+									<th style="text-align: left; padding: 0.5rem 0; font-size: 0.75rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted-foreground);">Status</th>
+									<th style="text-align: left; padding: 0.5rem 0; font-size: 0.75rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted-foreground);">Priority</th>
+								</tr>
+							</thead>
+							<tbody>
+								for _, task := range data.RecentTasks {
+									<tr>
+										<td style="padding: 0.5rem 0; font-size: 0.875rem; color: var(--foreground);">{ task.Title }</td>
+										<td style="padding: 0.5rem 0;">
+											@Badge(task.Status, taskStatusVariant(task.Status))
+										</td>
+										<td style="padding: 0.5rem 0; font-size: 0.875rem; color: var(--muted-foreground);">{ fmt.Sprintf("%d", task.Priority) }</td>
+									</tr>
+								}
+							</tbody>
+						</table>
+					}
+				}
+			}
+			if data.TodaySessions != nil {
+				@Card("Tracked Time") {
+					if len(data.TodaySessions) == 0 {
+						<p class="text-sm text-muted-foreground">No tracked time yet.</p>
+					} else {
+						<ul style="list-style: none; padding: 0; margin: 0;">
+							for _, sess := range data.TodaySessions {
+								<li style="padding: 0.5rem 0; border-bottom: 1px solid var(--border); font-size: 0.875rem;">
+									<span class="font-medium text-nerve-bone">{ sess.SessionType }</span>
+									<span class="text-muted-foreground" style="margin-left: 0.5rem;">{ sess.StartedAt }</span>
+									if sess.EndedAt != "" {
+										<span class="text-muted-foreground"> – { sess.EndedAt }</span>
+									} else {
+										<span class="text-primary" style="margin-left: 0.5rem;">active</span>
+									}
+								</li>
+							}
+						</ul>
+					}
+				}
+			}
+		}
+	}
+}
+
+// countOpenTasks returns the number of tasks not in "done" status.
+func countOpenTasks(tasks []ProjectDetailTask) int {
+	count := 0
+	for _, t := range tasks {
+		if t.Status != "done" {
+			count++
+		}
+	}
+	return count
+}
+
+// taskStatusVariant maps a task status to a badge CSS variant.
+func taskStatusVariant(status string) string {
+	switch status {
+	case "done":
+		return "success"
+	case "in_progress":
+		return "primary"
+	default:
+		return ""
+	}
+}

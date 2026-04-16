@@ -1,0 +1,109 @@
+package templates
+
+import "time"
+
+type AdminUserRowData struct {
+	ID                 int64
+	Username           string
+	Role               string
+	MustChangePassword bool
+	CreatedAt          time.Time
+}
+
+type AdminUsersPageData struct {
+	Users     []AdminUserRowData
+	CSRFToken string
+	Error     string
+}
+
+templ AdminUsersPage(data AdminUsersPageData) {
+	@BaseLayout(BaseLayoutData{Title: "User Management", CSRFToken: data.CSRFToken, ActivePage: "users"}) {
+		@PageHeader("SN—USR", T(ctx, "users.users"), T(ctx, "users.users_subtitle"))
+		@AlertError(data.Error)
+		@CardPlain() {
+			<table class="table">
+				<thead>
+					<tr>
+						<th>{ T(ctx, "users.id") }</th>
+						<th>{ T(ctx, "users.username") }</th>
+						<th>{ T(ctx, "users.role") }</th>
+						<th>{ T(ctx, "users.must_change_password") }</th>
+						<th>{ T(ctx, "users.created_at") }</th>
+						<th>{ T(ctx, "users.actions") }</th>
+					</tr>
+				</thead>
+				<tbody>
+					for _, u := range data.Users {
+						<tr>
+							<td class="font-mono text-xs">{ int64ToString(u.ID) }</td>
+							<td>{ u.Username }</td>
+							<td>
+								if u.Role == "admin" {
+									@Badge(T(ctx, "common.admin"), "badge-admin")
+								} else {
+									@Badge(T(ctx, "users.user"), "")
+								}
+							</td>
+							<td>
+								if u.MustChangePassword {
+									@Badge("yes", "badge-warning")
+								}
+							</td>
+							<td class="font-mono text-xs">{ FormatDateTime(u.CreatedAt) }</td>
+							<td>
+								<div class="flex flex-wrap gap-2">
+									if u.ID != 1 || u.Role != "admin" {
+									<form method="POST" action={ templ.SafeURL("/admin/users/" + int64ToString(u.ID) + "/change-role") } class="inline">
+										<input type="hidden" name="csrf_token" value={ data.CSRFToken }/>
+										if u.Role == "admin" {
+											<input type="hidden" name="role" value="user"/>
+											<button type="submit" class="button button-secondary">{ T(ctx, "users.make_user") }</button>
+										} else {
+											<input type="hidden" name="role" value="admin"/>
+											<button type="submit" class="button button-secondary">{ T(ctx, "users.make_admin") }</button>
+										}
+									</form>
+								}
+									<form method="POST" action={ templ.SafeURL("/admin/users/" + int64ToString(u.ID) + "/reset-password") } class="inline-flex items-center gap-1">
+										<input type="hidden" name="csrf_token" value={ data.CSRFToken }/>
+										<input type="password" name="new_password" placeholder={ T(ctx, "users.new_password") } required class="form-input" style="width: 140px; margin-bottom: 0;"/>
+										<button type="submit" class="button button-secondary">{ T(ctx, "users.reset") }</button>
+									</form>
+								if u.ID != 1 {
+									<form method="POST" action={ templ.SafeURL("/admin/users/" + int64ToString(u.ID) + "/delete") } class="inline">
+										<input type="hidden" name="csrf_token" value={ data.CSRFToken }/>
+										<button type="submit" class="button button-danger">{ T(ctx, "common.delete") }</button>
+									</form>
+								}
+								</div>
+							</td>
+						</tr>
+					}
+				</tbody>
+			</table>
+		}
+		<div class="mt-4 max-w-lg">
+			@Card(T(ctx, "users.create_user")) {
+				<form method="POST" action="/admin/users">
+					<input type="hidden" name="csrf_token" value={ data.CSRFToken }/>
+					<div class="form-group">
+						<label for="new_username">{ T(ctx, "users.username") }</label>
+						<input type="text" id="new_username" name="username" required class="form-input"/>
+					</div>
+					<div class="form-group">
+						<label for="new_password">{ T(ctx, "auth.password") }</label>
+						<input type="password" id="new_password" name="password" required class="form-input"/>
+					</div>
+					<div class="form-group">
+						<label for="new_role">{ T(ctx, "users.role") }</label>
+						<select id="new_role" name="role" class="form-select">
+							<option value="user">{ T(ctx, "users.user") }</option>
+							<option value="admin">{ T(ctx, "common.admin") }</option>
+						</select>
+					</div>
+					<button type="submit" class="button button-primary">{ T(ctx, "users.create_user") }</button>
+				</form>
+			}
+		</div>
+	}
+}

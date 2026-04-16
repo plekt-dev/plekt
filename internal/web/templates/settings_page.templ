@@ -1,0 +1,307 @@
+package templates
+
+import (
+	"strconv"
+	"strings"
+)
+
+// SettingsFieldError maps field names to error messages.
+type SettingsFieldError map[string]string
+
+// SettingsFormValues holds the raw string values submitted from the settings form.
+type SettingsFormValues struct {
+	AdminEmail          string
+	AllowPluginInstall  bool
+	SessionTTLMinutes   string
+	RegistrationEnabled bool
+	PasswordMinLength   string
+}
+
+// SettingsPageData is the view model for the settings page.
+type SettingsPageData struct {
+	Values       SettingsFormValues
+	Errors       SettingsFieldError
+	FlashSuccess bool
+	CSRFToken    string
+	Sections     []SettingsSection  // plugin-contributed settings sections
+	CoreUpdate   *CoreUpdateData    // nil when updater is not configured
+}
+
+templ SettingsPage(data SettingsPageData) {
+	@BaseLayout(BaseLayoutData{Title: "Settings", CSRFToken: data.CSRFToken, ActivePage: "settings"}) {
+		@PageHeader(T(ctx, "settings.code"), T(ctx, "settings.title"), T(ctx, "settings.subtitle"))
+		if data.CoreUpdate != nil {
+			@CoreUpdateSection(*data.CoreUpdate)
+		}
+		if data.FlashSuccess {
+			@AlertSuccess(T(ctx, "settings.saved"))
+		}
+		<div class="plugin-settings-grid">
+			@Card(T(ctx, "settings.card_title")) {
+				<form method="POST" action="/admin/settings">
+					<input type="hidden" name="csrf_token" value={ data.CSRFToken }/>
+					<div class="form-group">
+						<label for="admin_email">{ T(ctx, "settings.admin_email") }</label>
+						<input
+							type="email"
+							id="admin_email"
+							name="admin_email"
+							value={ data.Values.AdminEmail }
+							class={ "form-input", templ.KV("input-error", data.Errors["admin_email"] != "") }
+						/>
+						if data.Errors["admin_email"] != "" {
+							<p class="field-error">{ data.Errors["admin_email"] }</p>
+						}
+					</div>
+					<div class="form-group">
+						<div class="checkbox-row">
+							if data.Values.AllowPluginInstall {
+								<input type="checkbox" id="allow_plugin_install" name="allow_plugin_install" checked/>
+							} else {
+								<input type="checkbox" id="allow_plugin_install" name="allow_plugin_install"/>
+							}
+							<label for="allow_plugin_install">{ T(ctx, "settings.allow_plugin_install") }</label>
+						</div>
+					</div>
+					<div class="form-group">
+						<label for="session_ttl_minutes">{ T(ctx, "settings.session_ttl") }</label>
+						<input
+							type="number"
+							id="session_ttl_minutes"
+							name="session_ttl_minutes"
+							value={ data.Values.SessionTTLMinutes }
+							min="0"
+							class={ "form-input", templ.KV("input-error", data.Errors["session_ttl_minutes"] != "") }
+						/>
+						if data.Errors["session_ttl_minutes"] != "" {
+							<p class="field-error">{ data.Errors["session_ttl_minutes"] }</p>
+						}
+					</div>
+					<div class="form-group">
+						<div class="checkbox-row">
+							if data.Values.RegistrationEnabled {
+								<input type="checkbox" id="registration_enabled" name="registration_enabled" checked/>
+							} else {
+								<input type="checkbox" id="registration_enabled" name="registration_enabled"/>
+							}
+							<label for="registration_enabled">{ T(ctx, "settings.registration_enabled") }</label>
+						</div>
+					</div>
+					<div class="form-group">
+						<label for="password_min_length">{ T(ctx, "settings.password_min_length") }</label>
+						<input
+							type="number"
+							id="password_min_length"
+							name="password_min_length"
+							value={ data.Values.PasswordMinLength }
+							min="1"
+							class={ "form-input", templ.KV("input-error", data.Errors["password_min_length"] != "") }
+						/>
+						if data.Errors["password_min_length"] != "" {
+							<p class="field-error">{ data.Errors["password_min_length"] }</p>
+						}
+					</div>
+					<button type="submit" class="button button-primary">{ T(ctx, "settings.save") }</button>
+				</form>
+			}
+			for _, section := range data.Sections {
+				@PluginSettingsSection(data.CSRFToken, section)
+			}
+		</div>
+	}
+}
+
+// pluginCheckboxChecked returns true when value is "true", "on", or "1".
+func pluginCheckboxChecked(value string) bool {
+	return value == "true" || value == "on" || value == "1"
+}
+
+// pluralCount renders n with a singular/plural section label.
+func pluralCount(n int) string {
+	if n == 1 {
+		return "1 section"
+	}
+	return strconv.Itoa(n) + " sections"
+}
+
+// pluginLinkSafe returns true when url is root-relative (starts with "/").
+// Plugin-supplied URLs must not be used as hrefs unless they are same-origin.
+func pluginLinkSafe(url string) bool {
+	return strings.HasPrefix(url, "/")
+}
+
+// PluginSettingsSection renders one plugin-contributed settings section.
+templ PluginSettingsSection(csrfToken string, section SettingsSection) {
+	<div class="card plugin-settings-card animate-reveal">
+		<div class="card-header plugin-settings-card-header">
+			<span class="plugin-settings-card-title">{ section.Title }</span>
+			<span class="plugin-settings-card-source">{ section.SourcePlugin }</span>
+		</div>
+		<div class="card-content plugin-settings-card-content">
+			if section.Description != "" {
+				<p class="plugin-settings-card-desc">{ section.Description }</p>
+			}
+			<!--
+			  Plugin extension form. Native HTML POST would navigate the
+			  browser to /p/{plugin}/action/{tool} and dump the raw JSON
+			  response into the page. We intercept submit via the global
+			  PluginSettingsForm.submit() helper (defined in main.js),
+			  which fetches with a JSON body matching the WASM action
+			  endpoint contract and shows the result inline.
+			-->
+			<form
+				class="plugin-settings-form"
+				data-plugin={ section.SourcePlugin }
+				data-action={ section.SubmitAction }
+				data-csrf={ csrfToken }
+				onsubmit="return MC.pluginSettingsSubmit(event);"
+			>
+				for _, field := range section.Fields {
+					@PluginSettingsField(field)
+				}
+				<button type="submit" class="button button-primary">{ T(ctx, "settings.save") }</button>
+			</form>
+			<div class="plugin-section-status" style="font-size: 11px; margin-top: 0.5rem; color: var(--muted-foreground);"></div>
+			if len(section.FooterLinks) > 0 {
+				<div style="margin-top: 0.75rem; font-size: 11px;">
+					for _, link := range section.FooterLinks {
+						<a href={ templ.SafeURL(link.URL) } style="color: var(--primary); margin-right: 1rem;">{ link.Label }</a>
+					}
+				</div>
+			}
+		</div>
+	</div>
+}
+
+// PluginSettingsField renders one field inside a plugin settings section.
+templ PluginSettingsField(field SettingsField) {
+	<div class="form-group">
+		if field.Type == "link" {
+			if pluginLinkSafe(field.Value) {
+				<a href={ templ.SafeURL(field.Value) } style="font-size: 13px; color: var(--primary);">{ field.Label }</a>
+			} else {
+				<span style="font-size: 13px;">{ field.Label }</span>
+			}
+			if field.HelpText != "" {
+				<p style="font-size: 11px; color: var(--muted-foreground); margin-top: 0.25rem;">{ field.HelpText }</p>
+			}
+		} else if field.Type == "checkbox" {
+			<div class="checkbox-row">
+				if pluginCheckboxChecked(field.Value) {
+					<input
+						type="checkbox"
+						id={ field.Name }
+						name={ field.Name }
+						if field.ReadOnly {
+							disabled
+						}
+						checked
+					/>
+				} else {
+					<input
+						type="checkbox"
+						id={ field.Name }
+						name={ field.Name }
+						if field.ReadOnly {
+							disabled
+						}
+					/>
+				}
+				<label for={ field.Name } style="font-size: 13px;">{ field.Label }</label>
+			</div>
+			if field.HelpText != "" {
+				<p style="font-size: 11px; color: var(--muted-foreground); margin-top: 0.25rem;">{ field.HelpText }</p>
+			}
+		} else if field.Type == "select" {
+			<label for={ field.Name } style="font-size: 13px;">{ field.Label }</label>
+			<select
+				id={ field.Name }
+				name={ field.Name }
+				class="form-input"
+				if field.ReadOnly {
+					disabled
+				}
+			>
+				for _, opt := range field.Options {
+					if opt.Value == field.Value {
+						<option value={ opt.Value } selected>{ opt.Label }</option>
+					} else {
+						<option value={ opt.Value }>{ opt.Label }</option>
+					}
+				}
+			</select>
+			if field.HelpText != "" {
+				<p style="font-size: 11px; color: var(--muted-foreground); margin-top: 0.25rem;">{ field.HelpText }</p>
+			}
+		} else if field.Type == "textarea" {
+			<label for={ field.Name } style="font-size: 13px;">{ field.Label }</label>
+			<textarea
+				id={ field.Name }
+				name={ field.Name }
+				class="form-input"
+				placeholder={ field.Placeholder }
+				if field.Required {
+					required
+				}
+				if field.ReadOnly {
+					readonly
+				}
+			>{ field.Value }</textarea>
+			if field.HelpText != "" {
+				<p style="font-size: 11px; color: var(--muted-foreground); margin-top: 0.25rem;">{ field.HelpText }</p>
+			}
+		} else {
+			// text, password, number, and write_only fields
+			<label for={ field.Name } style="font-size: 13px;">{ field.Label }</label>
+			if field.Type == "password" || field.WriteOnly {
+				<input
+					type="password"
+					id={ field.Name }
+					name={ field.Name }
+					value=""
+					placeholder={ field.Placeholder }
+					class="form-input"
+					if field.Required {
+						required
+					}
+					if field.ReadOnly {
+						readonly
+					}
+				/>
+			} else if field.Type == "number" {
+				<input
+					type="number"
+					id={ field.Name }
+					name={ field.Name }
+					value={ field.Value }
+					placeholder={ field.Placeholder }
+					class="form-input"
+					if field.Required {
+						required
+					}
+					if field.ReadOnly {
+						readonly
+					}
+				/>
+			} else {
+				<input
+					type="text"
+					id={ field.Name }
+					name={ field.Name }
+					value={ field.Value }
+					placeholder={ field.Placeholder }
+					class="form-input"
+					if field.Required {
+						required
+					}
+					if field.ReadOnly {
+						readonly
+					}
+				/>
+			}
+			if field.HelpText != "" {
+				<p style="font-size: 11px; color: var(--muted-foreground); margin-top: 0.25rem;">{ field.HelpText }</p>
+			}
+		}
+	</div>
+}

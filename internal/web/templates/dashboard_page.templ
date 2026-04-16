@@ -1,0 +1,88 @@
+package templates
+
+// DashboardPageData holds all data needed to render the full dashboard page.
+type DashboardPageData struct {
+	CSRFToken   string
+	Widgets     []WidgetRenderData
+	WidgetsMeta string // JSON array of {key, title, visible} for the settings modal
+}
+
+// WidgetRenderData holds the data for rendering a single widget card.
+type WidgetRenderData struct {
+	Key            string
+	Title          string
+	Width          string
+	RefreshSeconds int
+	DataJSON       string
+	Error          string
+	RefreshURL     string
+	LinkTemplate   string
+	Visible        bool
+}
+
+// DashboardPage renders the full dashboard page with navigation header,
+// widget grid, and layout save form.
+templ DashboardPage(data DashboardPageData) {
+	@BaseLayout(BaseLayoutData{Title: "Dashboard", CSRFToken: data.CSRFToken, ActivePage: "dashboard"}) {
+		<div class="dashboard-header">
+			@PageHeader(T(ctx, "dashboard.code"), T(ctx, "dashboard.title"), T(ctx, "dashboard.subtitle"))
+			<button type="button" class="dashboard-settings-btn" onclick="MC.dashboardSettings()" title={ T(ctx, "dashboard.settings") }>
+				<svg class="icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"></path><circle cx="12" cy="12" r="3"></circle></svg>
+			</button>
+		</div>
+		if len(data.Widgets) == 0 {
+			<div class="mt-8 text-center text-muted-foreground">
+				<p>{ T(ctx, "dashboard.no_plugins") } <a href="/admin/plugins" class="link">{ T(ctx, "nav.plugins") }</a> { T(ctx, "dashboard.no_plugins_suffix") }</p>
+			</div>
+		} else {
+			<div class="widget-grid" data-csrf={ data.CSRFToken } data-widgets-meta={ data.WidgetsMeta }>
+				for _, w := range data.Widgets {
+					if w.Visible {
+						@WidgetPartial(w)
+					}
+				}
+			</div>
+		}
+	}
+}
+
+// WidgetPartial renders a single widget card (full card, used on initial page load).
+// htmx polling swaps only the inner content via innerHTML to avoid flickering.
+templ WidgetPartial(data WidgetRenderData) {
+	<div
+		class={ "card widget-card", data.Width }
+		draggable="true"
+		data-widget-key={ data.Key }
+		if data.RefreshSeconds > 0 {
+			hx-get={ data.RefreshURL }
+			hx-trigger={ "every " + itoa(data.RefreshSeconds) + "s" }
+			hx-target="this"
+			hx-swap="innerHTML"
+		}
+	>
+		@WidgetInner(data)
+	</div>
+}
+
+// WidgetInner renders the inner content of a widget card (header + content).
+// Used by HandleWidgetRefresh to return only the inner HTML, avoiding
+// DOM element replacement and visual flickering on htmx polling.
+templ WidgetInner(data WidgetRenderData) {
+	<div class="card-header">
+		<span class="text-sm font-semibold text-nerve-bone">{ data.Title }</span>
+	</div>
+	<div class="card-content">
+		if data.Error != "" {
+			<p class="widget-error">{ data.Error }</p>
+		} else {
+			<div
+				class="widget-data"
+				data-widget-key={ data.Key }
+				data-json={ data.DataJSON }
+				if data.LinkTemplate != "" {
+					data-link-template={ data.LinkTemplate }
+				}
+			></div>
+		}
+	</div>
+}

@@ -1,0 +1,75 @@
+package templates
+
+import "time"
+
+type AgentRowData struct {
+	ID        int64
+	Name      string
+	Masked    string
+	CreatedAt time.Time
+	UpdatedAt time.Time
+}
+
+type AgentListPageData struct {
+	Agents       []AgentRowData
+	CSRFToken    string
+	NewToken     string
+	NewAgentName string
+}
+
+templ AgentListPage(data AgentListPageData) {
+	@BaseLayout(BaseLayoutData{Title: "Agents", CSRFToken: data.CSRFToken, ActivePage: "agents"}) {
+		@PageHeader("SN—AGT", T(ctx, "agents.agents"), T(ctx, "agents.agents_subtitle"))
+		if data.NewToken != "" {
+			<div class="alert alert-success" style="word-break: break-all;">
+				<strong>{ data.NewAgentName }</strong> : { T(ctx, "agents.token_created") }
+				@TokenRevealBox("create-token", data.NewToken)
+				<small style="display: block; margin-top: 0.5rem; opacity: 0.85;">{ T(ctx, "agents.token_warning") }</small>
+			</div>
+		}
+		@CardPlain() {
+			<table class="table">
+				<thead>
+					<tr>
+						<th>{ T(ctx, "agents.name") }</th>
+						<th>{ T(ctx, "agents.token") }</th>
+						<th>{ T(ctx, "agents.created") }</th>
+						<th>{ T(ctx, "agents.actions") }</th>
+					</tr>
+				</thead>
+				<tbody>
+					for _, a := range data.Agents {
+						<tr>
+							<td>
+								<a href={ templ.SafeURL("/admin/agents/" + int64ToString(a.ID)) } class="link">{ a.Name }</a>
+							</td>
+							<td><code>{ a.Masked }</code></td>
+							<td class="font-mono text-xs">{ FormatDateTime(a.CreatedAt) }</td>
+							<td>
+								<div class="flex flex-wrap gap-2">
+									<a href={ templ.SafeURL("/admin/agents/" + int64ToString(a.ID)) } class="button button-secondary">{ T(ctx, "agents.permissions") }</a>
+									<form method="POST" action={ templ.SafeURL("/admin/agents/" + int64ToString(a.ID) + "/delete") } class="inline">
+										<input type="hidden" name="csrf_token" value={ data.CSRFToken }/>
+										<button type="submit" class="button button-danger">{ T(ctx, "common.delete") }</button>
+									</form>
+								</div>
+							</td>
+						</tr>
+					}
+				</tbody>
+			</table>
+		}
+		<div class="mt-4 max-w-lg">
+			@Card(T(ctx, "agents.create_agent")) {
+				<form method="POST" action="/admin/agents">
+					<input type="hidden" name="csrf_token" value={ data.CSRFToken }/>
+					<div class="form-group">
+						<label for="agent_name">{ T(ctx, "agents.name") }</label>
+						<input type="text" id="agent_name" name="name" required class="form-input" placeholder="Claude Desktop"/>
+					</div>
+					<button type="submit" class="button button-primary">{ T(ctx, "agents.create_agent") }</button>
+				</form>
+			}
+		</div>
+	}
+}

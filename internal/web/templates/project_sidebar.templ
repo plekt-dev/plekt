@@ -1,0 +1,67 @@
+package templates
+
+import "html/template"
+
+// ProjectSidebarData holds data needed to render the project-scoped sidebar.
+type ProjectSidebarData struct {
+	CSRFToken              string
+	ProjectID              int64
+	ProjectName            string
+	ProjectDescription     string
+	RenderedDescription    template.HTML // pre-sanitized markdown HTML
+	ProjectColor           string
+	ProjectImage           string
+	ActiveTab              string // page_id of the active sub-item
+	SubItems               []PluginNavItem
+}
+
+// ProjectSidebar renders the project-scoped sidebar that replaces the global one.
+// It includes OOB swap attribute so htmx can swap it into the existing sidebar element.
+templ ProjectSidebar(data ProjectSidebarData, oob bool) {
+	<div id="sidebar-body" class="sidebar-body"
+		if oob {
+			hx-swap-oob="true"
+		}
+	>
+		<div class="sidebar-header">
+			<a href="/p/projects-plugin/projects" class="nav-item" title={ T(ctx, "projects.back_to_projects") } style="padding: 0.5rem; margin-bottom: 0.25rem; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted-foreground);">
+				<svg class="icon" viewBox="0 0 24 24" style="width: 14px; height: 14px;"><path d="m15 18-6-6 6-6"></path></svg>
+				<span class="nav-text">{ T(ctx, "projects.back_to_projects") }</span>
+			</a>
+		</div>
+		<div class="sidebar-content">
+			<div class="sidebar-project-info" style="padding: 0.5rem 0.75rem; margin-bottom: 0.5rem;" title={ data.ProjectName }>
+				<div class="project-avatar-collapsed" style={ "background-color: " + data.ProjectColor }>
+					{ firstLetter(data.ProjectName) }
+				</div>
+				<div class="project-info-expanded">
+					<div class="flex items-center gap-2">
+						<div style={ "width: 12px; height: 12px; border-radius: 50%; background-color: " + data.ProjectColor + "; flex-shrink: 0;" }></div>
+						<span class="text-sm font-semibold text-nerve-bone tracking-tight" style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">{ data.ProjectName }</span>
+					</div>
+					if data.RenderedDescription != "" {
+						<div class="sidebar-project-desc markdown-body" style="font-size: 0.6875rem; color: hsl(var(--muted-foreground)); margin: 0.25rem 0 0 0; line-height: 1.4; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;">
+							@templ.Raw(string(data.RenderedDescription))
+						</div>
+					} else if data.ProjectDescription != "" {
+						<p style="font-size: 0.6875rem; color: hsl(var(--muted-foreground)); margin: 0.25rem 0 0 0; line-height: 1.4; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;">{ data.ProjectDescription }</p>
+					}
+				</div>
+			</div>
+			<nav>
+				for _, item := range data.SubItems {
+					<a
+						href={ templ.SafeURL("/p/projects-plugin/project/" + int64ToString(data.ProjectID) + "/" + item.PageID) }
+						class={ "nav-item", templ.KV("active", data.ActiveTab == item.PageID) }
+						title={ TNav(ctx, item.PluginName, item.PageID, item.Title) }
+						hx-target="#content"
+						hx-push-url="true"
+					>
+						@pluginIcon(item.Icon)
+						<span class="nav-text">{ TNav(ctx, item.PluginName, item.PageID, item.Title) }</span>
+					</a>
+				}
+			</nav>
+		</div>
+	</div>
+}

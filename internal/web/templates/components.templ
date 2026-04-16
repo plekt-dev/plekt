@@ -1,0 +1,118 @@
+package templates
+
+// PageHeader renders a consistent page heading with section code, title, and subtitle.
+templ PageHeader(code string, title string, subtitle string) {
+	<div class="mb-8 animate-reveal">
+		<span class="text-xs font-mono text-primary uppercase tracking-widest mb-1 block">{ code }</span>
+		<h1 class="text-2xl font-bold text-nerve-bone tracking-tight">{ title }</h1>
+		if subtitle != "" {
+			<p class="text-sm text-muted-foreground mt-1">{ subtitle }</p>
+		}
+	</div>
+}
+
+// Card renders a card container with optional title.
+templ Card(title string) {
+	<div class="card animate-reveal">
+		if title != "" {
+			<div class="card-header">
+				<span class="text-sm font-semibold text-nerve-bone">{ title }</span>
+			</div>
+		}
+		<div class="card-content">
+			{ children... }
+		</div>
+	</div>
+}
+
+// CardPlain renders a card without internal padding structure (for tables etc.)
+templ CardPlain() {
+	<div class="card animate-reveal">
+		{ children... }
+	</div>
+}
+
+// Badge renders a status badge.
+templ Badge(text string, variant string) {
+	<span class={ "badge", variant }>{ text }</span>
+}
+
+// StatusDot renders a status indicator dot.
+templ StatusDot(state string) {
+	<div class={ "status-dot", state }></div>
+}
+
+// AlertError renders an error alert banner.
+templ AlertError(message string) {
+	if message != "" {
+		<div class="alert alert-error">{ message }</div>
+	}
+}
+
+// AlertSuccess renders a success alert banner.
+templ AlertSuccess(message string) {
+	if message != "" {
+		<div class="alert alert-success">{ message }</div>
+	}
+}
+
+// TokenRevealBox renders a token that is masked by default with Show/Hide and Copy buttons.
+// The real token is stored in a data attribute and only revealed on click.
+// Safe for streaming : token is never visible unless the user explicitly clicks Show.
+templ TokenRevealBox(id string, token string) {
+	<div style="display: flex; align-items: center; gap: 0.5rem; margin-top: 0.5rem;">
+		<code
+			id={ id }
+			data-token={ token }
+			data-revealed="false"
+			style="flex: 1; padding: 0.5rem; background: rgba(0,0,0,0.2); border-radius: 4px; font-family: inherit; letter-spacing: 0.05em;"
+		>••••••••••••••••••••••••••••••••</code>
+		<button
+			type="button"
+			class="button button-secondary"
+			id={ id + "-toggle" }
+			data-show-label={ T(ctx, "agents.show_token") }
+			data-hide-label={ T(ctx, "agents.hide_token") }
+			onclick={ toggleTokenReveal(id) }
+			style="white-space: nowrap;"
+		>
+			{ T(ctx, "agents.show_token") }
+		</button>
+		<button
+			type="button"
+			class="button button-secondary"
+			id={ id + "-copy" }
+			onclick={ copyToken(id) }
+			style="white-space: nowrap;"
+		>
+			{ T(ctx, "agents.copy_token") }
+		</button>
+	</div>
+}
+
+script toggleTokenReveal(id string) {
+	var el = document.getElementById(id);
+	var btn = document.getElementById(id + '-toggle');
+	var showLabel = btn.getAttribute('data-show-label') || 'Show';
+	var hideLabel = btn.getAttribute('data-hide-label') || 'Hide';
+	if (el.getAttribute('data-revealed') === 'true') {
+		el.textContent = '\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022';
+		el.setAttribute('data-revealed', 'false');
+		btn.textContent = showLabel;
+	} else {
+		el.textContent = el.getAttribute('data-token');
+		el.setAttribute('data-revealed', 'true');
+		btn.textContent = hideLabel;
+	}
+}
+
+script copyToken(id string) {
+	var el = document.getElementById(id);
+	var btn = document.getElementById(id + '-copy');
+	var token = el.getAttribute('data-token');
+	navigator.clipboard.writeText(token).then(function() {
+		var orig = btn.textContent;
+		btn.textContent = 'Copied!';
+		setTimeout(function() { btn.textContent = orig; }, 2000);
+	});
+}

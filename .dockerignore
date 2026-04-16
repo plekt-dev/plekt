@@ -1,0 +1,51 @@
+# Build context — keep lean so `docker build` isn't dragging MBs of
+# test output and JS deps.
+
+# VCS
+.git
+.gitignore
+.gitattributes
+
+# Build artifacts
+/plekt-core
+/plekt-core.exe
+/plekt-updater
+/plekt-updater.exe
+*.exe
+*.exe.old
+*.exe.new
+
+# Runtime state (we mount these via volumes, never bake into image)
+/data
+/plugins
+
+# Test + tooling output
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+*.log
+*.out
+coverage*.html
+.admin_token
+
+# Playwright / JS
+node_modules
+package-lock.json
+playwright.config.ts
+playwright-report
+test-results
+/e2e
+
+# Dev
+.claude
+.claude-flow
+.swarm
+.idea
+.vscode
+.DS_Store
+
+# Docs and meta that don't affect the runtime binary
+CHANGES.md
+LICENSE
+Makefile

@@ -1,0 +1,29 @@
+package templates
+
+type LoginPageData struct {
+	CSRFToken        string
+	Error            string
+	ShowRegisterLink bool
+}
+
+templ LoginPage(data LoginPageData) {
+	@AuthLayout(AuthLayoutData{Title: T(ctx, "auth.sign_in"), CSRFToken: data.CSRFToken}) {
+		<h1>{ T(ctx, "auth.sign_in") }</h1>
+		@AlertError(data.Error)
+		<form method="POST" action="/login">
+			<input type="hidden" name="csrf_token" value={ data.CSRFToken }/>
+			<div class="form-group">
+				<label for="username">{ T(ctx, "auth.username") }</label>
+				<input type="text" id="username" name="username" class="form-input" required autocomplete="username"/>
+			</div>
+			<div class="form-group">
+				<label for="password">{ T(ctx, "auth.password") }</label>
+				<input type="password" id="password" name="password" class="form-input" required autocomplete="current-password"/>
+			</div>
+			<button type="submit" class="button button-primary w-full">{ T(ctx, "auth.sign_in") }</button>
+		</form>
+		if data.ShowRegisterLink {
+			<p class="mt-4"><a href="/register">{ T(ctx, "auth.create_account_hint") }</a></p>
+		}
+	}
+}

@@ -1,0 +1,212 @@
+package templates
+
+import (
+	"strings"
+
+	"github.com/plekt-dev/plekt/internal/loader"
+)
+
+// PluginPermissionsPageData carries all values needed to render the
+// per-plugin permissions settings page.
+type PluginPermissionsPageData struct {
+	Name         string
+	Version      string
+	Dir          string
+	Capabilities []loader.Capability
+	Hosts        []loader.HostGrant
+	CSRFToken    string
+}
+
+// severityBadgeVariant maps a CapabilitySeverity to a badge CSS class variant.
+func severityBadgeVariant(s loader.CapabilitySeverity) string {
+	switch s {
+	case loader.SeverityHigh:
+		return "badge-error"
+	case loader.SeverityMedium:
+		return "badge-loading"
+	default:
+		return "badge-active"
+	}
+}
+
+// PluginPermissionsPage renders the full permissions settings page for a
+// single loaded plugin.
+templ PluginPermissionsPage(data PluginPermissionsPageData) {
+	@BaseLayout(BaseLayoutData{Title: "Permissions : " + data.Name, CSRFToken: data.CSRFToken, ActivePage: "plugins"}) {
+		<a class="back-link" href={ templ.SafeURL("/admin/plugins/" + data.Name) }>&larr; { data.Name }</a>
+		@PageHeader("PERMISSIONS", data.Name, "Review capabilities and manage network host grants for this plugin.")
+
+		@Card("Plugin") {
+			<dl class="dl-grid">
+				<dt>Name</dt>
+				<dd>{ data.Name }</dd>
+				<dt>Version</dt>
+				<dd class="font-mono text-xs">{ data.Version }</dd>
+				<dt>Directory</dt>
+				<dd class="font-mono text-xs">{ data.Dir }</dd>
+			</dl>
+		}
+
+		@Card("Capabilities") {
+			if len(data.Capabilities) == 0 {
+				<p class="text-muted-foreground text-sm">This plugin declares no special capabilities.</p>
+			} else {
+				<div class="flex flex-col gap-3">
+					for _, c := range data.Capabilities {
+						<div class="card-content" style="border: 1px solid var(--border); border-radius: 6px; padding: 0.75rem;">
+							<div class="flex items-center gap-2">
+								@Badge(string(c.Severity), severityBadgeVariant(c.Severity))
+								<span class="text-sm font-semibold text-nerve-bone">{ c.Title }</span>
+							</div>
+							<p class="text-xs text-muted-foreground mt-1">{ c.Description }</p>
+							if len(c.Details) > 0 {
+								<ul class="font-mono text-xs mt-2" style="padding-left: 1rem; list-style: disc;">
+									for _, d := range c.Details {
+										<li>{ d }</li>
+									}
+								</ul>
+							}
+						</div>
+					}
+				</div>
+			}
+		}
+
+		@CardPlain() {
+			<div class="card-header flex items-center justify-between">
+				<span class="text-sm font-semibold text-nerve-bone">Network hosts</span>
+				<button
+					type="button"
+					class="button button-primary"
+					onclick={ openGrantHostDialog(data.Name, data.CSRFToken) }
+				>+ Add host</button>
+			</div>
+			<div class="card-content">
+				if len(data.Hosts) == 0 {
+					<p class="text-muted-foreground text-sm">No hosts granted. This plugin has no outbound network access.</p>
+				} else {
+					<table class="table">
+						<thead>
+							<tr>
+								<th>Host</th>
+								<th>Source</th>
+								<th>Granted by</th>
+								<th>Granted at</th>
+								<th>Actions</th>
+							</tr>
+						</thead>
+						<tbody id={ "host-grants-body-" + data.Name }>
+							for _, g := range data.Hosts {
+								@HostGrantRow(data.Name, g, data.CSRFToken)
+							}
+						</tbody>
+					</table>
+				}
+			</div>
+		}
+	}
+}
+
+// HostGrantRow renders a single row in the network hosts table.
+templ HostGrantRow(pluginName string, g loader.HostGrant, csrfToken string) {
+	<tr data-host={ g.Host }>
+		<td class="font-mono text-xs">{ g.Host }</td>
+		<td>
+			if g.Source == "install" {
+				@Badge("install", "badge-active")
+			} else {
+				@Badge("operator", "badge-loading")
+			}
+		</td>
+		<td class="text-xs">{ g.GrantedBy }</td>
+		<td class="font-mono text-xs">{ g.GrantedAt.UTC().Format("2006-01-02 15:04:05") }</td>
+		<td>
+			<button
+				type="button"
+				class="button button-danger"
+				onclick={ revokeHostGrant(pluginName, g.Host, csrfToken) }
+			>Revoke</button>
+		</td>
+	</tr>
+}
+
+// openGrantHostDialog opens a mc-dialog with a host input. On confirm, it
+// POSTs to /admin/plugins/{name}/hosts as JSON, then reloads the page.
+script openGrantHostDialog(pluginName string, csrfToken string) {
+	var existing = document.getElementById('mc-confirm-dialog');
+	if (existing) existing.remove();
+
+	var dialog = document.createElement('dialog');
+	dialog.id = 'mc-confirm-dialog';
+	dialog.className = 'mc-dialog mc-confirm-dialog';
+	dialog.innerHTML = ''
+		+ '<div class="mc-confirm-content">'
+		+   '<h3 class="mc-confirm-title">Grant network host</h3>'
+		+   '<p class="mc-confirm-message">Allow ' + pluginName + ' to reach a new outbound host.</p>'
+		+   '<label class="mc-confirm-input-label" style="margin-top:0.5rem;">Host (e.g. my-whisper.internal:9001)</label>'
+		+   '<input type="text" class="form-input mc-confirm-input" id="mc-grant-host-input" autocomplete="off" spellcheck="false" />'
+		+   '<div class="mc-confirm-actions" style="margin-top:0.75rem;">'
+		+     '<button class="button button-ghost mc-confirm-cancel">Cancel</button>'
+		+     '<button class="button button-primary mc-confirm-ok">Grant</button>'
+		+   '</div>'
+		+ '</div>';
+	document.body.appendChild(dialog);
+	if (typeof dialog.showModal === 'function') { dialog.showModal(); }
+
+	var input = dialog.querySelector('#mc-grant-host-input');
+	var okBtn = dialog.querySelector('.mc-confirm-ok');
+	var cancelBtn = dialog.querySelector('.mc-confirm-cancel');
+	input.focus();
+
+	function close() { try { dialog.close(); } catch(e){} dialog.remove(); }
+	cancelBtn.addEventListener('click', close);
+	okBtn.addEventListener('click', function(){
+		var host = (input.value || '').trim();
+		if (!host) { input.focus(); return; }
+		fetch('/admin/plugins/' + encodeURIComponent(pluginName) + '/hosts', {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken },
+			body: JSON.stringify({ host: host }),
+		}).then(function(resp){
+			if (!resp.ok) {
+				return resp.json().then(function(j){ throw new Error((j && j.error) || 'Grant failed'); });
+			}
+			close();
+			window.location.reload();
+		}).catch(function(err){
+			if (window.MC && MC.confirm) {
+				MC.confirm({ title: 'Grant failed', message: err.message, okText: 'OK', cancelText: 'Close', danger: false });
+			}
+		});
+	});
+}
+
+// revokeHostGrant fires a DELETE request after a MC.confirm prompt.
+script revokeHostGrant(pluginName string, host string, csrfToken string) {
+	function doRevoke() {
+		fetch('/admin/plugins/' + encodeURIComponent(pluginName) + '/hosts/' + encodeURIComponent(host), {
+			method: 'DELETE',
+			headers: { 'X-CSRF-Token': csrfToken },
+		}).then(function(resp){
+			if (!resp.ok) throw new Error('Revoke failed');
+			window.location.reload();
+		}).catch(function(err){
+				if (window.MC && MC.confirm) {
+					MC.confirm({ title: 'Error', message: err.message || 'Revoke failed', okText: 'OK', danger: false });
+				}
+			});
+	}
+	if (window.MC && MC.confirm) {
+		MC.confirm({
+			title: 'Revoke host grant',
+			message: 'Remove ' + host + ' from ' + pluginName + '?',
+			okText: 'Revoke',
+			cancelText: 'Cancel',
+		}).then(function(ok){ if (ok) doRevoke(); });
+	} else {
+		doRevoke();
+	}
+}
+
+// joinStrings is a tiny helper used by the templ compiler contexts above.
+func joinStrings(s []string, sep string) string { return strings.Join(s, sep) }

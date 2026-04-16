@@ -1,0 +1,24 @@
+plugin_dir: "./plugins"
+data_dir: "./data"
+
+server:
+  addr: ":8080"
+  read_timeout: 30s
+  write_timeout: 30s
+
+loader:
+  max_plugins: 50
+  reload_drain_timeout: 5s
+  wasm_memory_limit_pages: 512
+  auto_load_on_startup: true
+
+registry:
+  url: "https://registry.plekt.dev/registry.json"
+  check_interval: 24h
+  default_plugins:
+    - tasks-plugin
+    - notes-plugin
+    - projects-plugin
+    - pomodoro-plugin
+    - scheduler-plugin
+    - voice-plugin

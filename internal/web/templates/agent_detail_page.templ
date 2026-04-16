@@ -1,0 +1,164 @@
+package templates
+
+type ToolPermission struct {
+	Name     string
+	Selected bool
+}
+
+type PluginPermissionSection struct {
+	PluginName  string
+	DisplayName string
+	Tools       []ToolPermission
+	AllSelected bool
+}
+
+type AgentDetailPageData struct {
+	Agent              AgentRowData
+	Sections           []PluginPermissionSection
+	CSRFToken          string
+	NewToken           string
+	WebhookURL         string
+	WebhookMode        string // "async" | "sync"
+	WebhookSecretSet   bool
+}
+
+templ AgentDetailPage(data AgentDetailPageData) {
+	@BaseLayout(BaseLayoutData{Title: data.Agent.Name + " : Agent", CSRFToken: data.CSRFToken, ActivePage: "agents"}) {
+		@PageHeader("SN—AGT", data.Agent.Name, T(ctx, "agents.agent_detail_subtitle"))
+		if data.NewToken != "" {
+			<div class="alert alert-success" style="word-break: break-all;">
+				{ T(ctx, "agents.new_token_after_rotate") }
+				@TokenRevealBox("rotate-token", data.NewToken)
+				<small style="display: block; margin-top: 0.5rem; opacity: 0.85;">{ T(ctx, "agents.token_warning") }</small>
+			</div>
+		}
+		<div class="flex flex-wrap gap-4 mb-4">
+			<div>
+				<span class="text-xs text-nerve-steel">{ T(ctx, "agents.token") }</span>
+				<code style="display: block;">{ data.Agent.Masked }</code>
+			</div>
+			<div>
+				<span class="text-xs text-nerve-steel">{ T(ctx, "agents.created") }</span>
+				<span class="font-mono text-xs" style="display: block;">{ FormatDateTime(data.Agent.CreatedAt) }</span>
+			</div>
+			<div>
+				<form method="POST" action={ templ.SafeURL("/admin/agents/" + int64ToString(data.Agent.ID) + "/rotate") }>
+					<input type="hidden" name="csrf_token" value={ data.CSRFToken }/>
+					<button type="submit" class="button button-danger">{ T(ctx, "agents.rotate_token") }</button>
+				</form>
+			</div>
+			<div>
+				<a href="/admin/agents" class="button button-secondary">{ T(ctx, "agents.back_to_list") }</a>
+			</div>
+		</div>
+		@Card(T(ctx, "agents.webhook_delivery")) {
+			<form method="POST" action={ templ.SafeURL("/admin/agents/" + int64ToString(data.Agent.ID) + "/webhook") } class="max-w-lg">
+				<input type="hidden" name="csrf_token" value={ data.CSRFToken }/>
+				<div class="form-group">
+					<label for="webhook_url">{ T(ctx, "agents.webhook_url") }</label>
+					<input
+						id="webhook_url"
+						type="text"
+						name="webhook_url"
+						value={ data.WebhookURL }
+						placeholder="http://localhost:8765/"
+						class="form-input"
+					/>
+				</div>
+				<div class="form-group">
+					<label for="webhook_mode">{ T(ctx, "agents.webhook_mode") }</label>
+					<select id="webhook_mode" name="webhook_mode" class="form-select">
+						<option value="async" selected?={ data.WebhookMode != "sync" }>{ T(ctx, "agents.webhook_mode_async") }</option>
+						<option value="sync" selected?={ data.WebhookMode == "sync" }>{ T(ctx, "agents.webhook_mode_sync") }</option>
+					</select>
+				</div>
+				<div class="form-group">
+					<label for="webhook-secret-input">
+						{ T(ctx, "agents.webhook_secret") }
+						if data.WebhookSecretSet {
+							<span style="color: hsl(140 70% 50%); margin-left: 0.5rem;">: { T(ctx, "agents.webhook_secret_configured") }</span>
+						} else {
+							<span class="text-nerve-steel" style="margin-left: 0.5rem;">: { T(ctx, "agents.webhook_secret_empty") }</span>
+						}
+					</label>
+					<div class="flex gap-2 items-stretch">
+						<input
+							id="webhook-secret-input"
+							type="password"
+							name="webhook_secret"
+							placeholder={ T(ctx, "agents.webhook_secret_placeholder") }
+							autocomplete="off"
+							class="form-input"
+							style="flex: 1; margin-bottom: 0;"
+						/>
+						<button type="button" class="button button-secondary" onclick={ generateWebhookSecret() }>
+							{ T(ctx, "agents.webhook_secret_generate") }
+						</button>
+					</div>
+					<small class="text-xs text-nerve-steel" style="display: block; margin-top: 0.5rem;">
+						{ T(ctx, "agents.webhook_secret_hint") }
+					</small>
+				</div>
+				<button type="submit" class="button button-primary">{ T(ctx, "agents.save_webhook") }</button>
+			</form>
+		}
+		@Card(T(ctx, "agents.permissions")) {
+			<form method="POST" action={ templ.SafeURL("/admin/agents/" + int64ToString(data.Agent.ID) + "/permissions") }>
+				<input type="hidden" name="csrf_token" value={ data.CSRFToken }/>
+				for _, section := range data.Sections {
+					<div class="mb-4" style="border: 1px solid hsl(var(--border)); border-radius: 6px; padding: 1rem;">
+						<div class="flex items-center gap-2 mb-2" style="border-bottom: 1px solid hsl(var(--border)); padding-bottom: 0.5rem;">
+							<label class="flex items-center gap-2" style="cursor: pointer; font-weight: 600;">
+								<input
+									type="checkbox"
+									name={ "perm_" + section.PluginName }
+									value="*"
+									if section.AllSelected {
+										checked
+									}
+									onchange={ selectAllHandler(section.PluginName) }
+								/>
+								{ section.DisplayName }
+								<span class="text-xs text-nerve-steel">({ T(ctx, "agents.select_all") })</span>
+							</label>
+						</div>
+						<div class="flex flex-wrap gap-3" style="padding-left: 1.5rem;">
+							for _, tool := range section.Tools {
+								<label class="flex items-center gap-1" style="cursor: pointer;">
+									<input
+										type="checkbox"
+										name={ "perm_" + section.PluginName }
+										value={ tool.Name }
+										class={ "tool-cb-" + section.PluginName }
+										if tool.Selected {
+											checked
+										}
+									/>
+									<span class="text-xs font-mono">{ tool.Name }</span>
+								</label>
+							}
+						</div>
+					</div>
+				}
+				<button type="submit" class="button button-primary">{ T(ctx, "agents.save_permissions") }</button>
+			</form>
+		}
+	}
+}
+
+script selectAllHandler(pluginName string) {
+	const master = event.target;
+	const boxes = document.querySelectorAll('.tool-cb-' + pluginName);
+	boxes.forEach(cb => { cb.checked = master.checked; });
+}
+
+script generateWebhookSecret() {
+	const bytes = new Uint8Array(32);
+	crypto.getRandomValues(bytes);
+	const hex = Array.from(bytes).map(b => b.toString(16).padStart(2, '0')).join('');
+	const input = document.getElementById('webhook-secret-input');
+	if (input) {
+		input.type = 'text';
+		input.value = hex;
+	}
+}

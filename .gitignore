@@ -1,0 +1,88 @@
+# Go
+bin/
+dist/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.prof
+vendor/
+
+# WASM (Extism / Plugins)
+*.wasm
+!**/tasks-plugin/plugin.wasm # Keep example/default wasm if needed, but usually better to build them
+# Actually, the spec says plugin.wasm is compiled, so we should ignore it generally.
+# If they are part of the repo, we might want to keep them, but usually they are artifacts.
+# I'll ignore .wasm files generally.
+
+# SQLite
+*.db
+*.db-journal
+*.db-shm
+*.db-raw
+*.db-wal
+# Specific for Plekt (sqlite per plugin)
+**/*.db
+
+# Atlas (Migrations)
+.atlas/
+
+# Templ (Frontend)
+*_templ.go
+*_templ.txt
+
+# Environment / Sensitive
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.pub
+# Plekt specific security
+*.sig
+
+# IDEs
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Logs
+*.log
+logs/
+
+# Dependencies
+# (Keep go.sum as it's common practice to track it)
+# go.sum
+# Note: go.mod should NOT be ignored.
+
+# Plekt Specific
+.admin_token
+data/
+docs/analyze.md
+/plugins/
+
+# Coverage / test output
+*.out
+coverage*.html
+
+# Playwright E2E
+playwright-report/
+test-results/
+e2e/test-data/
+e2e/test-plugins/
+e2e/mc-server
+e2e/mc-server.exe
+node_modules/
+
+# Build artifacts (anchored to repo root so they don't match cmd/plekt-core/)
+/plekt-core
+/plekt-core.exe
+/plekt-updater
+/plekt-updater.exe
+*.exe.old
+*.exe.new

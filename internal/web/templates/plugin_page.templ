@@ -1,0 +1,61 @@
+package templates
+
+import "fmt"
+
+// PluginPageData holds all data needed to render a plugin page.
+type PluginPageData struct {
+	CSRFToken       string
+	PluginName      string
+	PageID          string
+	PageTitle       string
+	PageType        string
+	DataJSON        string
+	ToolsJSON       string
+	ExtensionsJSON  string
+	Error           string
+	ActivePage      string
+	UserID          int64
+	Username        string
+	ScriptURL       string
+	StyleURL        string
+	RowLinkTemplate string
+}
+
+// PluginPage renders a full plugin page with data rendered by JS.
+templ PluginPage(data PluginPageData) {
+	@BaseLayout(BaseLayoutData{Title: TNav(ctx, data.PluginName, data.PageID, data.PageTitle), CSRFToken: data.CSRFToken, ActivePage: data.ActivePage}) {
+		if data.StyleURL != "" {
+			<link rel="stylesheet" href={ data.StyleURL }/>
+		}
+		if data.ScriptURL != "" {
+			<script src={ data.ScriptURL } defer></script>
+		}
+		@PageHeader("SN—PLG", TNav(ctx, data.PluginName, data.PageID, data.PageTitle), data.PluginName)
+		if data.Error != "" {
+			@AlertError(data.Error)
+		} else {
+			<div
+				class="plugin-page-content"
+				data-page-type={ data.PageType }
+				data-plugin={ data.PluginName }
+				data-page={ data.PageID }
+				data-json={ data.DataJSON }
+				data-tools={ data.ToolsJSON }
+				data-action-url={ "/p/" + data.PluginName + "/action/" }
+				data-csrf={ data.CSRFToken }
+				if data.Username != "" {
+					data-username={ data.Username }
+				}
+				if data.UserID > 0 {
+					data-user-id={ fmt.Sprintf("%d", data.UserID) }
+				}
+				if data.ExtensionsJSON != "" {
+					data-extensions={ data.ExtensionsJSON }
+				}
+				if data.RowLinkTemplate != "" {
+					data-row-link={ data.RowLinkTemplate }
+				}
+			></div>
+		}
+	}
+}

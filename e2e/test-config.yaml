@@ -1,0 +1,8 @@
+server:
+  addr: ":18080"
+  admin_username: "e2e-admin"
+  admin_password: "e2e-admin-password-bootstrap"
+data_dir: "./e2e/test-data"
+plugin_dir: "./e2e/test-plugins"
+loader:
+  auto_load_on_startup: true
