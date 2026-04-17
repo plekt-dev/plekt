@@ -25,6 +25,7 @@ import (
 
 	"github.com/plekt-dev/plekt/internal/agents"
 	"github.com/plekt-dev/plekt/internal/config"
+	"github.com/plekt-dev/plekt/internal/db"
 	"github.com/plekt-dev/plekt/internal/eventbus"
 	mcI18n "github.com/plekt-dev/plekt/internal/i18n"
 	"github.com/plekt-dev/plekt/internal/loader"
@@ -44,7 +45,13 @@ func main() {
 			return
 		}
 	}
-	if err := runServer(os.Args, os.Getenv); err != nil {
+	// signal.NotifyContext converts SIGINT/SIGTERM into a context
+	// cancellation. runServer takes the same shape, so tests can pass
+	// their own context.WithCancel and skip signal plumbing entirely
+	// (in-process signal multiplexing flakes on Linux + -race).
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+	if err := runServer(ctx, os.Args, os.Getenv); err != nil {
 		os.Exit(1)
 	}
 }
@@ -82,7 +89,9 @@ func printBanner() {
 
 // runServer contains the testable startup logic for main.
 // It returns an error if startup fails; errors are already logged before returning.
-func runServer(args []string, getenv func(string) string) error {
+// ctx is the shutdown signal: cancel it (or send SIGINT/SIGTERM to a process
+// that wires signal.NotifyContext into ctx) to trigger graceful shutdown.
+func runServer(ctx context.Context, args []string, getenv func(string) string) error {
 	printBanner()
 
 	// 1. Determine config path: first CLI arg, then MC_CONFIG env var.
@@ -122,8 +131,8 @@ func runServer(args []string, getenv func(string) string) error {
 		}
 	}()
 
-	// 11. Wait for shutdown signal or server error.
-	waitForShutdown(srv, serverErr)
+	// 11. Wait for shutdown signal (via ctx) or server error.
+	waitForShutdown(ctx, srv, serverErr)
 
 	// 12. Shutdown plugins.
 	shutdownPlugins(manager)
@@ -304,16 +313,19 @@ func openSettingsDB(dataDir string) (*sql.DB, error) {
 		return nil, err
 	}
 	dbPath := filepath.Join(dataDir, "settings.db")
-	return sql.Open("sqlite", dbPath)
+	return sql.Open("sqlite", db.WithSystemPragmas(dbPath))
 }
 
 // openAuditDB opens (or creates) the SQLite database file for audit logs.
+// WAL + busy_timeout are required: every MCP tool call writes one entry,
+// so concurrent requests previously hit SQLITE_BUSY and dropped audit
+// entries with a warning-only log.
 func openAuditDB(dataDir string) (*sql.DB, error) {
 	if err := os.MkdirAll(dataDir, 0o755); err != nil {
 		return nil, err
 	}
 	dbPath := filepath.Join(dataDir, "audit.db")
-	return sql.Open("sqlite", dbPath)
+	return sql.Open("sqlite", db.WithSystemPragmas(dbPath))
 }
 
 // loadConfig reads and parses the YAML config file at path.
@@ -353,14 +365,12 @@ func buildServer(cfg config.ServerConfig, handler http.Handler) *http.Server {
 	}
 }
 
-// waitForShutdown blocks until SIGINT/SIGTERM is received or the server returns an error.
-func waitForShutdown(srv *http.Server, serverErr <-chan error) {
-	quit := make(chan os.Signal, 1)
-	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
-
+// waitForShutdown blocks until shutdownCtx is cancelled (signal received via
+// signal.NotifyContext, or test cancellation) or the server returns an error.
+func waitForShutdown(shutdownCtx context.Context, srv *http.Server, serverErr <-chan error) {
 	select {
-	case sig := <-quit:
-		slog.Info("received signal, shutting down", "signal", sig.String())
+	case <-shutdownCtx.Done():
+		slog.Info("shutdown requested", "cause", context.Cause(shutdownCtx))
 	case err := <-serverErr:
 		slog.Error("server error", "error", err)
 	}

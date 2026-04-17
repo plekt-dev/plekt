@@ -9,6 +9,8 @@ import (
 
 	extism "github.com/extism/go-sdk"
 	_ "modernc.org/sqlite" // CGO-free SQLite driver; registers the "sqlite" driver name.
+
+	"github.com/plekt-dev/plekt/internal/db"
 )
 
 // ---------------------------------------------------------------------------
@@ -296,30 +298,5 @@ type sqliteDBFactory struct{}
 // We rely on modernc.org/sqlite's `_pragma=` query-parameter form so every
 // pragma is applied to every connection the *sql.DB pool hands out.
 func (f *sqliteDBFactory) Open(dataSourceName string) (*sql.DB, error) {
-	return sql.Open("sqlite", withPluginDBPragmas(dataSourceName))
-}
-
-// withPluginDBPragmas appends the standard per-plugin SQLite pragmas to a DSN:
-// foreign keys ON, WAL journal mode, and a 5s busy timeout. Works for both
-// plain file paths ("plugins/foo/data.db") and URI-form DSNs
-// ("file:foo.db?mode=memory").
-func withPluginDBPragmas(dsn string) string {
-	pragmas := []string{
-		"_pragma=foreign_keys(1)",
-		"_pragma=journal_mode(WAL)",
-		"_pragma=busy_timeout(5000)",
-	}
-	sep := "?"
-	for _, c := range dsn {
-		if c == '?' {
-			sep = "&"
-			break
-		}
-	}
-	out := dsn
-	for _, p := range pragmas {
-		out += sep + p
-		sep = "&"
-	}
-	return out
+	return sql.Open("sqlite", db.WithPluginPragmas(dataSourceName))
 }

@@ -13,7 +13,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"syscall"
 	"testing"
 	"time"
 
@@ -205,7 +204,7 @@ func TestWaitForShutdown_ServerError(t *testing.T) {
 
 	done := make(chan struct{})
 	go func() {
-		waitForShutdown(srv, serverErr)
+		waitForShutdown(context.Background(), srv, serverErr)
 		close(done)
 	}()
 
@@ -217,7 +216,7 @@ func TestWaitForShutdown_ServerError(t *testing.T) {
 	}
 }
 
-func TestWaitForShutdown_Signal(t *testing.T) {
+func TestWaitForShutdown_ContextCancel(t *testing.T) {
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatalf("listen: %v", err)
@@ -227,29 +226,21 @@ func TestWaitForShutdown_Signal(t *testing.T) {
 
 	serverErr := make(chan error) // never sends
 
+	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
 	go func() {
-		waitForShutdown(srv, serverErr)
+		waitForShutdown(ctx, srv, serverErr)
 		close(done)
 	}()
 
-	// Give the goroutine time to reach signal.Notify and block on select.
 	time.Sleep(20 * time.Millisecond)
-
-	// Send SIGTERM to this process: waitForShutdown must handle it and return.
-	p, err := os.FindProcess(os.Getpid())
-	if err != nil {
-		t.Fatalf("FindProcess: %v", err)
-	}
-	if err := p.Signal(syscall.SIGTERM); err != nil {
-		t.Skipf("cannot send SIGTERM on this platform: %v", err)
-	}
+	cancel()
 
 	select {
 	case <-done:
 		// expected
 	case <-time.After(5 * time.Second):
-		t.Fatal("waitForShutdown did not return after SIGTERM within 5s")
+		t.Fatal("waitForShutdown did not return after ctx.Cancel within 5s")
 	}
 }
 
@@ -367,7 +358,7 @@ func TestLoadConfig_EmptyPath_ReturnsDefaults(t *testing.T) {
 }
 
 func TestRunServer_MissingConfigFile(t *testing.T) {
-	err := runServer([]string{"mc", "/nonexistent/path/config.yaml"}, func(string) string { return "" })
+	err := runServer(context.Background(), []string{"mc", "/nonexistent/path/config.yaml"}, func(string) string { return "" })
 	if err == nil {
 		t.Fatal("expected error for missing config file, got nil")
 	}
@@ -381,7 +372,7 @@ func TestRunServer_BuildApplicationError(t *testing.T) {
 	if err := os.WriteFile(cfgPath, []byte(content), 0600); err != nil {
 		t.Fatalf("write config: %v", err)
 	}
-	err := runServer([]string{"mc", cfgPath}, func(string) string { return "" })
+	err := runServer(context.Background(), []string{"mc", cfgPath}, func(string) string { return "" })
 	if err == nil {
 		t.Fatal("expected error when PluginDir is empty, got nil")
 	}
@@ -390,12 +381,16 @@ func TestRunServer_BuildApplicationError(t *testing.T) {
 	}
 }
 
-func TestMain_ViaSignal(t *testing.T) {
+// TestMain_ViaContextCancel exercises the same startup → shutdown path as
+// production main(), but triggers shutdown by cancelling the context that
+// runServer takes instead of sending SIGTERM to the test process. The
+// signal-based earlier version flaked on Linux + -race because in-process
+// signal multiplexing leaks across tests.
+func TestMain_ViaContextCancel(t *testing.T) {
 	if os.Getenv("MC_TEST_MAIN") == "skip" {
 		t.Skip("skipping main() integration test")
 	}
 
-	// Write a minimal valid config to a temp file.
 	dir := t.TempDir()
 	pluginDir := filepath.Join(dir, "plugins")
 	if err := os.MkdirAll(pluginDir, 0o755); err != nil {
@@ -407,36 +402,26 @@ func TestMain_ViaSignal(t *testing.T) {
 		t.Fatalf("write config: %v", err)
 	}
 
-	// Inject args so main() finds the config.
-	origArgs := os.Args
-	os.Args = []string{"plekt", cfgPath}
-	t.Cleanup(func() { os.Args = origArgs })
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 
-	// main() will block on waitForShutdown. Run in a goroutine.
-	done := make(chan struct{})
+	done := make(chan error, 1)
 	go func() {
-		defer close(done)
-		main()
+		done <- runServer(ctx, []string{"plekt", cfgPath}, os.Getenv)
 	}()
 
-	// Give main() time to start the server.
-	time.Sleep(50 * time.Millisecond)
+	// Give the server a moment to bind and reach waitForShutdown.
+	time.Sleep(100 * time.Millisecond)
 
-	// Send SIGTERM to trigger graceful shutdown.
-	p, err := os.FindProcess(os.Getpid())
-	if err != nil {
-		t.Fatalf("FindProcess: %v", err)
-	}
-	if err := p.Signal(syscall.SIGTERM); err != nil {
-		t.Skipf("cannot send SIGTERM: %v", err)
-	}
+	cancel()
 
-	// Wait for main() to return.
 	select {
-	case <-done:
-		// success
-	case <-time.After(10 * time.Second):
-		t.Fatal("main() did not return within 10s after SIGTERM")
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("runServer returned error: %v", err)
+		}
+	case <-time.After(30 * time.Second):
+		t.Fatal("runServer did not return within 30s after ctx.Cancel")
 	}
 }
 
@@ -449,9 +434,13 @@ func TestBuildApplication(t *testing.T) {
 		PluginDir: pluginDir,
 		DataDir:   dataDir,
 		Server: config.ServerConfig{
-			Addr:         "127.0.0.1:0",
-			ReadTimeout:  5 * time.Second,
-			WriteTimeout: 5 * time.Second,
+			Addr: "127.0.0.1:0",
+			// Generous timeouts so race-detector overhead on CI does
+			// not kill mid-handler. POST /register runs bcrypt, which
+			// under -race on Linux runners can take 3-8s; the previous
+			// 5s WriteTimeout caused EOFs on the response.
+			ReadTimeout:  30 * time.Second,
+			WriteTimeout: 30 * time.Second,
 		},
 	}
 
@@ -860,9 +849,13 @@ func buildTestApp(t *testing.T) (addr string, dataDir string, cleanup func()) {
 		PluginDir: dir,
 		DataDir:   dir,
 		Server: config.ServerConfig{
-			Addr:         "127.0.0.1:0",
-			ReadTimeout:  5 * time.Second,
-			WriteTimeout: 5 * time.Second,
+			Addr: "127.0.0.1:0",
+			// Generous timeouts so race-detector overhead on CI does
+			// not kill mid-handler. POST /register runs bcrypt, which
+			// under -race on Linux runners can take 3-8s; the previous
+			// 5s WriteTimeout caused EOFs on the response.
+			ReadTimeout:  30 * time.Second,
+			WriteTimeout: 30 * time.Second,
 		},
 	}
 	srv, manager, bus, cleanupFn, err := buildApplication(cfg)

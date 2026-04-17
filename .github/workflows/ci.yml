@@ -1,0 +1,103 @@
+name: CI
+
+# Runs on every push and PR. Keeps each step terse so a failure points
+# at one root cause: format → vet → unit test → race test → build.
+# Templ codegen runs first because *_templ.go files are gitignored.
+
+on:
+  # Commits only. PR-sync events would double-fire CI (one run per push,
+  # one per pull_request), so the pull_request trigger is intentionally
+  # omitted.
+  push:
+    branches: ['**']
+
+permissions:
+  contents: read
+
+concurrency:
+  # github.workflow + github.ref keeps PR runs and main runs in separate
+  # groups. cancel-in-progress kills any older run in the same group when
+  # a new commit arrives, so a rapid push series only burns minutes on
+  # the head commit.
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+
+      - name: Setup Go
+        uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c  # v6.4.0
+        with:
+          go-version: '1.25'
+          cache: true
+
+      - name: Generate templ
+        # Pin templ CLI to the exact version of the a-h/templ library in
+        # go.mod so generator output matches the runtime imports.
+        run: |
+          TEMPL_VERSION="$(go list -m -f '{{.Version}}' github.com/a-h/templ)"
+          echo "installing templ ${TEMPL_VERSION}"
+          go install github.com/a-h/templ/cmd/templ@${TEMPL_VERSION}
+          templ generate ./internal/web/templates
+
+      - name: gofmt
+        run: |
+          out="$(gofmt -l . | grep -v '_templ.go$' || true)"
+          if [ -n "$out" ]; then
+            echo "::error::gofmt found unformatted files:"
+            echo "$out"
+            exit 1
+          fi
+
+      - name: go vet
+        run: go vet ./...
+
+      - name: go test (race + coverage)
+        # -race catches cross-goroutine bugs (e.g. token cache leaks).
+        # -covermode=atomic is required when -race is on; emits a single
+        # coverage.out we ship to Codecov below. -v makes Go print one
+        # `--- PASS/FAIL/SKIP` line per test so the post-step summary can
+        # report exact counts.
+        run: |
+          set -o pipefail
+          go test -race -covermode=atomic -coverprofile=coverage.out -v ./... | tee test.log
+
+      - name: Test summary
+        # Always run, even if the test step fails, so the failure log
+        # still gets a count breakdown.
+        if: always()
+        run: |
+          PASS=$(grep -cE "^--- PASS" test.log || true)
+          FAIL=$(grep -cE "^--- FAIL" test.log || true)
+          SKIP=$(grep -cE "^--- SKIP" test.log || true)
+          TOTAL=$((PASS + FAIL + SKIP))
+          {
+            echo "## Test results"
+            echo ""
+            echo "| Status  | Count |"
+            echo "|---------|-------|"
+            echo "| Total   | $TOTAL |"
+            echo "| Passed  | $PASS |"
+            echo "| Failed  | $FAIL |"
+            echo "| Skipped | $SKIP |"
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "::notice title=Tests::$PASS passed, $FAIL failed, $SKIP skipped ($TOTAL total)"
+
+      - name: Upload coverage to Codecov
+        # v6.0.0 ships Node 24 binaries; v5.x still ran github-script@v7
+        # on Node 20 and triggered the deprecation warning on every run.
+        uses: codecov/codecov-action@57e3a136b779b570ffcdbf80b3bdc90e7fab3de2  # v6.0.0
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: coverage.out
+          fail_ci_if_error: false
+
+      - name: go build
+        # Sanity: both binaries actually link.
+        run: |
+          go build -o /tmp/plekt-core ./cmd/plekt-core/
+          go build -o /tmp/plekt-updater ./cmd/plekt-updater/

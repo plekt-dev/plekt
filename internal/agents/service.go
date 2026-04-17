@@ -207,6 +207,12 @@ func (svc *DefaultAgentService) SetPermissions(ctx context.Context, agentID int6
 	if err := svc.store.SetPermissions(ctx, agentID, perms); err != nil {
 		return err
 	}
+	// Invalidate the token cache so the next MCP request resolves the
+	// agent fresh from the DB. Without this, a tightening of permissions
+	// (e.g. admin removes wildcard) is silently bypassed for up to
+	// tokenCacheTTL because the cached entry still holds the old perms.
+	// This is the same reason RotateToken and Delete invalidate.
+	svc.invalidateTokenCache()
 	now := time.Now().UTC()
 	svc.emit(ctx, eventbus.Event{
 		Name:         eventbus.EventAgentPermissionsChanged,

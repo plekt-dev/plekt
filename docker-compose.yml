@@ -1,98 +1,44 @@
-# Plekt self-hosted workspace where humans and AI agents work together.
+# Plekt: self-hosted workspace where humans and AI agents work together.
 #
-# Quick start:
-#   1. Copy this file and config.yaml next to each other.
-#   2. Edit config.yaml if you need to change the admin bootstrap password,
-#      registry URL, or default plugins.
-#   3. docker-compose up -d
-#   4. Open http://localhost:8080 (or whatever PLEKT_HOST_PORT you set)
-#      and follow the first-run setup screen.
+# Usage:
+#   docker-compose up -d         # start
+#   docker-compose pull && up -d # update
+#   rm -rf ./data ./plugins      # wipe state
 #
-# Persistence:
-#   All runtime state lives under two named volumes (plekt_data,
-#   plekt_plugins). `docker-compose down` stops and removes the container
-#   but keeps the volumes, so your users, plugin DBs, and installed
-#   plugins survive restarts, image updates, and host reboots.
-#   `docker-compose down -v` (note the -v) wipes everything use only
-#   when you want a clean slate.
-#
-# Updating:
-#   docker-compose pull
-#   docker-compose up -d
-#   The new image is pulled, the container is recreated with the same
-#   volumes, and state continues from where it left off. No migration
-#   needed Plekt auto-applies plugin schema migrations on startup.
+# Bind mounts ./data and ./plugins hold all state, next to this file.
 
 services:
   plekt:
     image: ghcr.io/plekt-dev/plekt:${PLEKT_VERSION:-latest}
     container_name: plekt
-    restart: unless-stopped
-
+    restart: always
     ports:
-      # Host:container. Override PLEKT_HOST_PORT in .env or the shell to
-      # expose Plekt on a different host port (e.g. behind a reverse proxy).
       - "${PLEKT_HOST_PORT:-8080}:8080"
-
     volumes:
-      # Read-only config edit on the host, restart the container to apply.
       - ./config.yaml:/app/config.yaml:ro
-
-      # Named volume for SQLite DBs (core, users, audit, host_grants,
-      # plus per-plugin *.db files). Persists across container restarts,
-      # image updates, and host reboots. Named so `docker volume ls` lists
-      # them and `docker volume inspect plekt_data` shows the path for
-      # backups.
-      - plekt_data:/app/data
-
-      # Named volume for installed plugin directories. Plugins are
-      # downloaded from the registry on first run (and auto-unpacked into
-      # /app/plugins/{name}/). Keeping this persistent means we don't
-      # re-download on every container restart.
-      - plekt_plugins:/app/plugins
-
+      - ./data:/app/data
+      - ./plugins:/app/plugins
     environment:
-      # Signals to the auto-updater that self-swap is not allowed inside a
-      # container. The UI shows a "docker pull" notice instead of
-      # attempting a binary replacement that would be lost on restart.
+      # Disables the in-container auto-updater self-swap; the UI shows a
+      # "docker pull" notice instead.
       PLEKT_DOCKER: "1"
-
-      # Set TZ if you want scheduler plugin crons to run in a specific
-      # timezone. Default is UTC.
       # TZ: "Europe/Berlin"
-
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/health"]
       interval: 30s
       timeout: 3s
       start_period: 10s
       retries: 3
-
-    # Resource hints. Adjust to your environment Plekt idles under 100 MB
-    # but per-plugin WASM instances + SQLite pages can push memory up.
     deploy:
       resources:
         limits:
           memory: 1G
         reservations:
           memory: 128M
-
-    # Read-only root filesystem with tmpfs for anything the binary touches
-    # at runtime outside the mounted volumes. Reduces blast radius if a
-    # plugin ever escapes the WASM sandbox.
+    # Read-only rootfs shrinks the blast radius if a plugin escapes the
+    # WASM sandbox; /tmp stays writable via tmpfs.
     read_only: true
     tmpfs:
       - /tmp:size=64m
-
     security_opt:
       - no-new-privileges:true
-
-    labels:
-      com.plekt.service: "core"
-      com.plekt.component: "plekt"
-
-volumes:
-  plekt_data:
-    driver: local
-  plekt_plugins:
-    driver: local

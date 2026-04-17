@@ -14,6 +14,7 @@ import (
 
 	"github.com/plekt-dev/plekt/internal/agents"
 	"github.com/plekt-dev/plekt/internal/config"
+	"github.com/plekt-dev/plekt/internal/db"
 	"github.com/plekt-dev/plekt/internal/editor"
 	"github.com/plekt-dev/plekt/internal/eventbus"
 	"github.com/plekt-dev/plekt/internal/firstrun"
@@ -83,7 +84,7 @@ func buildInfrastructure(cfg config.Config) (*infrastructure, error) {
 	bus := eventbus.NewInMemoryBus()
 	infra.bus = bus
 
-	registryDB, err := sql.Open("sqlite", filepath.Join(cfg.DataDir, "plugins.db"))
+	registryDB, err := sql.Open("sqlite", db.WithSystemPragmas(filepath.Join(cfg.DataDir, "plugins.db")))
 	if err != nil {
 		return nil, fmt.Errorf("open registry DB: %w", err)
 	}
@@ -101,7 +102,7 @@ func buildInfrastructure(cfg config.Config) (*infrastructure, error) {
 	manager := loader.NewManager(cfg, bus, registryStore)
 	infra.manager = manager
 
-	hostGrantsDB, err := sql.Open("sqlite", filepath.Join(cfg.DataDir, "host_grants.db"))
+	hostGrantsDB, err := sql.Open("sqlite", db.WithSystemPragmas(filepath.Join(cfg.DataDir, "host_grants.db")))
 	if err != nil {
 		infra.stack.closeAll()
 		return nil, fmt.Errorf("open host grants DB: %w", err)

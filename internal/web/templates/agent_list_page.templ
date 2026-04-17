@@ -15,6 +15,10 @@ type AgentListPageData struct {
 	CSRFToken    string
 	NewToken     string
 	NewAgentName string
+	// MCPEndpoint is the absolute URL clients POST to (scheme://host/mcp).
+	// Computed server-side from the request so the displayed snippet matches
+	// the host the operator actually browsed to.
+	MCPEndpoint string
 }
 
 templ AgentListPage(data AgentListPageData) {
@@ -59,17 +63,39 @@ templ AgentListPage(data AgentListPageData) {
 				</tbody>
 			</table>
 		}
-		<div class="mt-4 max-w-lg">
+		<div class="mt-4 plugin-settings-grid">
+			@mcpConnectCard(data.MCPEndpoint)
 			@Card(T(ctx, "agents.create_agent")) {
 				<form method="POST" action="/admin/agents">
 					<input type="hidden" name="csrf_token" value={ data.CSRFToken }/>
 					<div class="form-group">
 						<label for="agent_name">{ T(ctx, "agents.name") }</label>
-						<input type="text" id="agent_name" name="name" required class="form-input" placeholder="Claude Desktop"/>
+						<input type="text" id="agent_name" name="name" required class="form-input" placeholder="Claude Code"/>
 					</div>
 					<button type="submit" class="button button-primary">{ T(ctx, "agents.create_agent") }</button>
 				</form>
 			}
 		</div>
 	}
+}
+
+// mcpConnectCard renders a one-liner registration command for Claude Code.
+// The endpoint is computed server-side so the URL matches the host the
+// operator is currently browsing.
+templ mcpConnectCard(endpoint string) {
+	<div>
+		@Card("MCP endpoint") {
+			<p class="text-sm" style="margin: 0 0 0.75rem 0; opacity: 0.85;">
+				Connect any MCP client. Example for Claude Code CLI. Swap the placeholder token with one of the agent tokens above.
+			</p>
+			<pre style="margin: 0 0 0.5rem 0; padding: 0.75rem; background: rgba(0,0,0,0.2); border-radius: 4px; overflow-x: auto;"><code>{ mcpAddCommand(endpoint) }</code></pre>
+			<small style="display: block; margin-bottom: 0.75rem; opacity: 0.75;">
+				Restart Claude Code if it's already running: MCP servers should load at startup.
+			</small>
+			<div class="form-group">
+				<label>Quick check (curl)</label>
+				<pre style="margin: 0; padding: 0.75rem; background: rgba(0,0,0,0.2); border-radius: 4px; overflow-x: auto;"><code>{ mcpCurlSnippet(endpoint) }</code></pre>
+			</div>
+		}
+	</div>
 }
