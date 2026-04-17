@@ -431,12 +431,15 @@ func TestMain_ViaSignal(t *testing.T) {
 		t.Skipf("cannot send SIGTERM: %v", err)
 	}
 
-	// Wait for main() to return.
+	// Wait for main() to return. The race detector roughly triples the
+	// per-instruction cost on Linux CI runners, so the bare 10s budget
+	// that's plenty locally trips on GitHub Actions during plugin
+	// scheduler shutdown. 60s leaves headroom without hiding a real hang.
 	select {
 	case <-done:
 		// success
-	case <-time.After(10 * time.Second):
-		t.Fatal("main() did not return within 10s after SIGTERM")
+	case <-time.After(60 * time.Second):
+		t.Fatal("main() did not return within 60s after SIGTERM")
 	}
 }
 
@@ -449,9 +452,13 @@ func TestBuildApplication(t *testing.T) {
 		PluginDir: pluginDir,
 		DataDir:   dataDir,
 		Server: config.ServerConfig{
-			Addr:         "127.0.0.1:0",
-			ReadTimeout:  5 * time.Second,
-			WriteTimeout: 5 * time.Second,
+			Addr: "127.0.0.1:0",
+			// Generous timeouts so race-detector overhead on CI does
+			// not kill mid-handler. POST /register runs bcrypt, which
+			// under -race on Linux runners can take 3-8s; the previous
+			// 5s WriteTimeout caused EOFs on the response.
+			ReadTimeout:  30 * time.Second,
+			WriteTimeout: 30 * time.Second,
 		},
 	}
 
@@ -860,9 +867,13 @@ func buildTestApp(t *testing.T) (addr string, dataDir string, cleanup func()) {
 		PluginDir: dir,
 		DataDir:   dir,
 		Server: config.ServerConfig{
-			Addr:         "127.0.0.1:0",
-			ReadTimeout:  5 * time.Second,
-			WriteTimeout: 5 * time.Second,
+			Addr: "127.0.0.1:0",
+			// Generous timeouts so race-detector overhead on CI does
+			// not kill mid-handler. POST /register runs bcrypt, which
+			// under -race on Linux runners can take 3-8s; the previous
+			// 5s WriteTimeout caused EOFs on the response.
+			ReadTimeout:  30 * time.Second,
+			WriteTimeout: 30 * time.Second,
 		},
 	}
 	srv, manager, bus, cleanupFn, err := buildApplication(cfg)
