@@ -62,16 +62,6 @@ templ BaseLayout(data BaseLayoutData) {
 							<svg class="icon" viewBox="0 0 24 24"><rect width="7" height="9" x="3" y="3" rx="1"></rect><rect width="7" height="5" x="14" y="3" rx="1"></rect><rect width="7" height="9" x="14" y="12" rx="1"></rect><rect width="7" height="5" x="3" y="16" rx="1"></rect></svg>
 							<span class="nav-text">{ T(ctx, "nav.dashboard") }</span>
 						</a>
-						if IsAdmin(ctx) {
-						<a href="/admin/plugins" class={ "nav-item", templ.KV("active", data.ActivePage == "plugins") } title={ T(ctx, "nav.plugins") }>
-							<svg class="icon" viewBox="0 0 24 24"><path d="m21 16-4 4-4-4"></path><path d="M17 20V4"></path><path d="m3 8 4-4 4 4"></path><path d="M7 4v16"></path></svg>
-							<span class="nav-text">{ T(ctx, "nav.plugins") }</span>
-						</a>
-						<a href="/admin/agents" class={ "nav-item", templ.KV("active", data.ActivePage == "agents") } title={ T(ctx, "nav.agents") }>
-							<svg class="icon" viewBox="0 0 24 24"><path d="M12 8V4H8"></path><rect width="16" height="12" x="4" y="8" rx="2"></rect><path d="M2 14h2"></path><path d="M20 14h2"></path><path d="M15 13v2"></path><path d="M9 13v2"></path></svg>
-							<span class="nav-text">{ T(ctx, "nav.agents") }</span>
-						</a>
-						}
 					</nav>
 					if len(PluginNavFromContext(ctx)) > 0 {
 						<div class="sidebar-label" style="margin-top: 1rem;">{ T(ctx, "nav.plugins_section") }</div>
@@ -91,6 +81,14 @@ templ BaseLayout(data BaseLayoutData) {
 							<span class="nav-text">{ T(ctx, "nav.profile") }</span>
 						</a>
 						if IsAdmin(ctx) {
+						<a href="/admin/plugins" class={ "nav-item", templ.KV("active", data.ActivePage == "plugins") } title={ T(ctx, "nav.plugins") }>
+							<svg class="icon" viewBox="0 0 24 24"><path d="m21 16-4 4-4-4"></path><path d="M17 20V4"></path><path d="m3 8 4-4 4 4"></path><path d="M7 4v16"></path></svg>
+							<span class="nav-text">{ T(ctx, "nav.plugins") }</span>
+						</a>
+						<a href="/admin/agents" class={ "nav-item", templ.KV("active", data.ActivePage == "agents") } title={ T(ctx, "nav.agents") }>
+							<svg class="icon" viewBox="0 0 24 24"><path d="M12 8V4H8"></path><rect width="16" height="12" x="4" y="8" rx="2"></rect><path d="M2 14h2"></path><path d="M20 14h2"></path><path d="M15 13v2"></path><path d="M9 13v2"></path></svg>
+							<span class="nav-text">{ T(ctx, "nav.agents") }</span>
+						</a>
 						<a href="/admin/audit" class={ "nav-item", templ.KV("active", data.ActivePage == "audit") } title={ T(ctx, "nav.audit_log") }>
 							<svg class="icon" viewBox="0 0 24 24"><path d="m10 10 2 2 8-8"></path><path d="M20 13a8 8 0 1 1-15.5-2"></path></svg>
 							<span class="nav-text">{ T(ctx, "nav.audit_log") }</span>

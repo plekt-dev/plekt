@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	mcdb "github.com/plekt-dev/plekt/internal/db"
 	_ "modernc.org/sqlite"
 )
 
@@ -32,7 +33,7 @@ type SQLiteUserStore struct {
 
 // NewSQLiteUserStore opens a SQLite DB at dsn, runs the schema migration, and returns a store.
 func NewSQLiteUserStore(ctx context.Context, dsn string) (*SQLiteUserStore, error) {
-	db, err := sql.Open("sqlite", dsn)
+	db, err := sql.Open("sqlite", mcdb.WithSystemPragmas(dsn))
 	if err != nil {
 		return nil, err
 	}

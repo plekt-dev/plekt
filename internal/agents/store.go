@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	mcdb "github.com/plekt-dev/plekt/internal/db"
 	_ "modernc.org/sqlite" // pure-Go SQLite driver, no CGO
 )
 
@@ -36,11 +37,7 @@ type SQLiteAgentStore struct {
 // enables WAL journal mode, configures the connection pool, enables foreign
 // keys, and ensures the schema exists.
 func NewSQLiteAgentStore(dbPath string) (*SQLiteAgentStore, error) {
-	dsn := dbPath
-	if !strings.Contains(dsn, "?") {
-		dsn += "?_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)"
-	}
-	db, err := sql.Open("sqlite", dsn)
+	db, err := sql.Open("sqlite", mcdb.WithSystemPragmas(dbPath))
 	if err != nil {
 		return nil, fmt.Errorf("open agent store db: %w", err)
 	}

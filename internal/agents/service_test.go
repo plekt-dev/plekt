@@ -2,6 +2,7 @@ package agents_test
 
 import (
 	"context"
+	"fmt"
 	"path/filepath"
 	"sync"
 	"testing"
@@ -197,6 +198,40 @@ func TestServiceSetAndListPermissions(t *testing.T) {
 			t.Errorf("got %v, want ErrAgentNotFound", err)
 		}
 	})
+
+	// Regression: SetPermissions used to leave the ResolveByToken cache
+	// untouched. New agents are created with wildcard `*/*` perms; if the
+	// admin then narrowed them, the cached entry kept the old wildcard for
+	// the cache TTL window and MCP requests were silently still allowed.
+	t.Run("invalidates token cache so the next resolve reflects new perms", func(t *testing.T) {
+		svc := newTestService(t)
+		a, _ := svc.Create(ctx, "narrowed")
+
+		// Prime the cache: the first ResolveByToken sees the default
+		// wildcard set the constructor wrote.
+		_, perms, err := svc.ResolveByToken(ctx, a.Token)
+		if err != nil {
+			t.Fatalf("ResolveByToken (priming): %v", err)
+		}
+		if len(perms) == 0 {
+			t.Fatalf("expected at least one default perm to be cached, got 0")
+		}
+
+		// Strip every permission.
+		if err := svc.SetPermissions(ctx, a.ID, nil); err != nil {
+			t.Fatalf("SetPermissions: %v", err)
+		}
+
+		// Without cache invalidation this call returns the stale wildcard
+		// and the test fails.
+		_, perms, err = svc.ResolveByToken(ctx, a.Token)
+		if err != nil {
+			t.Fatalf("ResolveByToken (post-restrict): %v", err)
+		}
+		if len(perms) != 0 {
+			t.Fatalf("expected 0 perms after SetPermissions(nil), got %d: %+v", len(perms), perms)
+		}
+	})
 }
 
 func TestServiceResolveByToken(t *testing.T) {
@@ -225,6 +260,70 @@ func TestServiceResolveByToken(t *testing.T) {
 		_, _, err := svc.ResolveByToken(ctx, "nonexistent-token")
 		if err != agents.ErrAgentNotFound {
 			t.Errorf("got %v, want ErrAgentNotFound", err)
+		}
+	})
+
+	// Production scenario: many agents hit /mcp at the same time, each
+	// with its own bearer token. The cache is keyed by token but the
+	// underlying perm slices share a *sql.DB pool and a single mutex.
+	// This test fans out N tokens with distinct narrow perms and pounds
+	// ResolveByToken from a goroutine per token, asserting each call
+	// sees only the perms that belong to its token. A cross-token leak
+	// (wrong agent returned, or wrong perm slice) fails the test.
+	t.Run("concurrent resolves never leak perms across tokens", func(t *testing.T) {
+		const agentCount = 10
+		const callsPerAgent = 200
+
+		svc := newTestService(t)
+
+		type fixture struct {
+			id    int64
+			token string
+			tool  string
+		}
+		fixtures := make([]fixture, agentCount)
+		for i := 0; i < agentCount; i++ {
+			a, err := svc.Create(ctx, "agent-"+string(rune('A'+i)))
+			if err != nil {
+				t.Fatalf("Create %d: %v", i, err)
+			}
+			tool := "tool_" + string(rune('a'+i))
+			if err := svc.SetPermissions(ctx, a.ID, []agents.AgentPermission{
+				{AgentID: a.ID, PluginName: "p" + string(rune('a'+i)), ToolName: tool},
+			}); err != nil {
+				t.Fatalf("SetPermissions %d: %v", i, err)
+			}
+			fixtures[i] = fixture{id: a.ID, token: a.Token, tool: tool}
+		}
+
+		var wg sync.WaitGroup
+		errs := make(chan error, agentCount*callsPerAgent)
+
+		for _, f := range fixtures {
+			wg.Add(1)
+			go func(f fixture) {
+				defer wg.Done()
+				for i := 0; i < callsPerAgent; i++ {
+					gotAgent, gotPerms, err := svc.ResolveByToken(ctx, f.token)
+					if err != nil {
+						errs <- err
+						return
+					}
+					if gotAgent.ID != f.id {
+						errs <- fmt.Errorf("token %s: got agent ID %d, want %d", f.token[:8], gotAgent.ID, f.id)
+						return
+					}
+					if len(gotPerms) != 1 || gotPerms[0].ToolName != f.tool {
+						errs <- fmt.Errorf("token %s: got perms %+v, want single tool %q", f.token[:8], gotPerms, f.tool)
+						return
+					}
+				}
+			}(f)
+		}
+		wg.Wait()
+		close(errs)
+		for err := range errs {
+			t.Error(err)
 		}
 	})
 }

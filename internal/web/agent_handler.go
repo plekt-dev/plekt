@@ -102,6 +102,7 @@ func (h *defaultWebAgentHandler) HandleAgentList(w http.ResponseWriter, r *http.
 		CSRFToken:    csrfToken,
 		NewToken:     newToken,
 		NewAgentName: newAgentName,
+		MCPEndpoint:  requestBaseURL(r) + "/mcp",
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	_ = templates.AgentListPage(data).Render(r.Context(), w)
@@ -415,4 +416,18 @@ func (h *defaultWebAgentHandler) resolveCSRF(r *http.Request) string {
 		return ""
 	}
 	return h.csrf.TokenForSession(entry)
+}
+
+// requestBaseURL returns scheme://host extracted from r. Honors
+// X-Forwarded-Proto so reverse proxies that terminate TLS show the
+// public https URL instead of the upstream http one.
+func requestBaseURL(r *http.Request) string {
+	scheme := "http"
+	if r.TLS != nil {
+		scheme = "https"
+	}
+	if p := r.Header.Get("X-Forwarded-Proto"); p != "" {
+		scheme = p
+	}
+	return scheme + "://" + r.Host
 }

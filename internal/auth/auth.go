@@ -10,6 +10,7 @@ import (
 	"regexp"
 	"time"
 
+	mcdb "github.com/plekt-dev/plekt/internal/db"
 	"github.com/plekt-dev/plekt/internal/eventbus"
 	_ "modernc.org/sqlite" // pure-Go SQLite driver, no CGO
 )
@@ -69,7 +70,7 @@ type SQLiteTokenStore struct {
 // ensures the tokens table exists. The caller is responsible for calling
 // Close() on the returned store.
 func NewSQLiteTokenStore(dbPath string) (*SQLiteTokenStore, error) {
-	db, err := sql.Open("sqlite", dbPath)
+	db, err := sql.Open("sqlite", mcdb.WithSystemPragmas(dbPath))
 	if err != nil {
 		return nil, fmt.Errorf("open token store db: %w", err)
 	}

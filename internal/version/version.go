@@ -5,4 +5,4 @@ package version
 // Override at build time:
 //
 //	go build -ldflags "-X github.com/plekt-dev/plekt/internal/version.Version=1.2.3"
-var Version = "1.0.3"
+var Version = "1.1.0"

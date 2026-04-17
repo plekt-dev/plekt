@@ -360,3 +360,20 @@ func SanitizePluginName(name string) string {
 	result = strings.Trim(result, "-")
 	return result
 }
+
+// mcpAddCommand renders the Claude Code CLI registration command for the
+// Plekt endpoint. Operators paste it into a shell; Claude Code writes the
+// MCP server config itself, so we don't need to ship the JSON snippet.
+func mcpAddCommand(endpoint string) string {
+	return `claude mcp add --transport http plekt ` + endpoint +
+		` --header "Authorization: Bearer <agent token>"`
+}
+
+// mcpCurlSnippet renders a tools/list curl call against the endpoint, used
+// as a sanity check that the token works before wiring up an MCP client.
+func mcpCurlSnippet(endpoint string) string {
+	return `curl -X POST ` + endpoint + ` \
+  -H "Authorization: Bearer <agent token>" \
+  -H "Content-Type: application/json" \
+  -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'`
+}

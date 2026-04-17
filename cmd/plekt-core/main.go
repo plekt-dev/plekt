@@ -25,6 +25,7 @@ import (
 
 	"github.com/plekt-dev/plekt/internal/agents"
 	"github.com/plekt-dev/plekt/internal/config"
+	"github.com/plekt-dev/plekt/internal/db"
 	"github.com/plekt-dev/plekt/internal/eventbus"
 	mcI18n "github.com/plekt-dev/plekt/internal/i18n"
 	"github.com/plekt-dev/plekt/internal/loader"
@@ -304,16 +305,19 @@ func openSettingsDB(dataDir string) (*sql.DB, error) {
 		return nil, err
 	}
 	dbPath := filepath.Join(dataDir, "settings.db")
-	return sql.Open("sqlite", dbPath)
+	return sql.Open("sqlite", db.WithSystemPragmas(dbPath))
 }
 
 // openAuditDB opens (or creates) the SQLite database file for audit logs.
+// WAL + busy_timeout are required: every MCP tool call writes one entry,
+// so concurrent requests previously hit SQLITE_BUSY and dropped audit
+// entries with a warning-only log.
 func openAuditDB(dataDir string) (*sql.DB, error) {
 	if err := os.MkdirAll(dataDir, 0o755); err != nil {
 		return nil, err
 	}
 	dbPath := filepath.Join(dataDir, "audit.db")
-	return sql.Open("sqlite", dbPath)
+	return sql.Open("sqlite", db.WithSystemPragmas(dbPath))
 }
 
 // loadConfig reads and parses the YAML config file at path.
