@@ -1,0 +1,70 @@
+name: CI
+
+# Runs on every push and PR. Keeps each step terse so a failure points
+# at one root cause: format → vet → unit test → race test → build.
+# Templ codegen runs first because *_templ.go files are gitignored.
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+
+      - name: Setup Go
+        uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c  # v6.4.0
+        with:
+          go-version: '1.25'
+          cache: true
+
+      - name: Generate templ
+        # Pin templ CLI to the exact version of the a-h/templ library in
+        # go.mod so generator output matches the runtime imports.
+        run: |
+          TEMPL_VERSION="$(go list -m -f '{{.Version}}' github.com/a-h/templ)"
+          echo "installing templ ${TEMPL_VERSION}"
+          go install github.com/a-h/templ/cmd/templ@${TEMPL_VERSION}
+          templ generate ./internal/web/templates
+
+      - name: gofmt
+        run: |
+          out="$(gofmt -l . | grep -v '_templ.go$' || true)"
+          if [ -n "$out" ]; then
+            echo "::error::gofmt found unformatted files:"
+            echo "$out"
+            exit 1
+          fi
+
+      - name: go vet
+        run: go vet ./...
+
+      - name: go test (race + coverage)
+        # -race catches cross-goroutine bugs (e.g. token cache leaks).
+        # -covermode=atomic is required when -race is on; emits a single
+        # coverage.out we ship to Codecov below.
+        run: go test -race -covermode=atomic -coverprofile=coverage.out ./...
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@18283e04ce6e62d37312384ff67231eb8fd56d24  # v5.4.3
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: coverage.out
+          fail_ci_if_error: false
+
+      - name: go build
+        # Sanity: both binaries actually link.
+        run: |
+          go build -o /tmp/plekt-core ./cmd/plekt-core/
+          go build -o /tmp/plekt-updater ./cmd/plekt-updater/
