@@ -19,31 +19,65 @@ Think WordPress, but the operator is you and your AI together.
 
 ## Quick Start
 
-**Recommended: native binary.** Download from [Releases](https://github.com/plekt-dev/plekt/releases), unpack, run `plekt-core.exe` (Windows) or `./plekt-core` (Linux/macOS). Open <http://localhost:8080>.
+Pick whichever install fits your setup.
 
-**Docker** also works:
+### Native binary
+
+Download from [Releases](https://github.com/plekt-dev/plekt/releases), unpack, run:
 
 ```bash
-docker pull ghcr.io/plekt-dev/plekt:latest
-docker run -d --name plekt -p 8080:8080 \
-  -v plekt_data:/app/data \
-  -v plekt_plugins:/app/plugins \
-  -v $PWD/config.yaml:/app/config.yaml:ro \
-  ghcr.io/plekt-dev/plekt:latest
+./plekt-core       # Linux / macOS
+plekt-core.exe     # Windows
 ```
 
-> Linux native binary builds, but isn't battle-tested yet. Reports welcome.
+Open <http://localhost:8080>. Plekt prints a one-time setup token to stdout on first run; copy it from the terminal and paste it into the register form.
+
+### Docker Compose
+
+Put [`docker-compose.yml`](docker-compose.yml) and [`config.yaml`](config.yaml) in the same directory:
+
+```bash
+docker-compose up -d
+```
+
+State persists in `./data` (SQLite DBs) and `./plugins` (installed bundles) next to the compose file.
+
+Grab the first-run setup token from the container logs:
+
+```bash
+docker logs plekt 2>&1 | grep -oE '[a-f0-9]{64}' | head -1
+```
+
+Open <http://localhost:8080>, paste the token, create the admin account.
+
+Update:
+
+```bash
+docker-compose pull && docker-compose up -d
+```
+
+> Linux and macOS native binaries build, but aren't battle-tested yet. Only Windows is exercised regularly. Reports welcome.
 
 ## Connect an MCP client
 
-After creating an agent in `/admin/agents`, copy the registration command shown on the page. For Claude Code:
+Plekt exposes one HTTP MCP endpoint:
 
-```bash
-claude mcp add --transport http plekt http://localhost:8080/mcp \
-  --header "Authorization: Bearer <agent token>"
+```
+POST http://<host>:8080/mcp
+Authorization: Bearer <agent token>
 ```
 
-Restart your client. Plekt's tools and the tools of every installed plugin become available, scoped to whatever permissions you gave that agent.
+Create an agent in `/admin/agents`, copy its token, point any MCP-capable client at the URL above. Tools available to that token = the permissions you granted in the UI.
+
+Each client wires this up its own way. We don't ship per-client integrations (at least not yet).
+
+**Example for the Claude Code CLI:**
+
+```bash
+claude mcp add --transport http plekt http://localhost:8080/mcp --header "Authorization: Bearer <agent token>"
+```
+
+Restart the client to pick up the new server.
 
 ## Stack
 
@@ -70,4 +104,6 @@ Project is early. Issues, PRs, ideas all welcome. Open one on GitHub.
 
 ## License
 
-[AGPL-3.0-only](LICENSE) © 2026 Yaroslav Temper.
+[AGPL-3.0-only](LICENSE) 
+
+© 2026 Yaroslav Temper
