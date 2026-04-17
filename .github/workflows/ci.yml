@@ -59,8 +59,33 @@ jobs:
       - name: go test (race + coverage)
         # -race catches cross-goroutine bugs (e.g. token cache leaks).
         # -covermode=atomic is required when -race is on; emits a single
-        # coverage.out we ship to Codecov below.
-        run: go test -race -covermode=atomic -coverprofile=coverage.out ./...
+        # coverage.out we ship to Codecov below. -v makes Go print one
+        # `--- PASS/FAIL/SKIP` line per test so the post-step summary can
+        # report exact counts.
+        run: |
+          set -o pipefail
+          go test -race -covermode=atomic -coverprofile=coverage.out -v ./... | tee test.log
+
+      - name: Test summary
+        # Always run, even if the test step fails, so the failure log
+        # still gets a count breakdown.
+        if: always()
+        run: |
+          PASS=$(grep -cE "^--- PASS" test.log || true)
+          FAIL=$(grep -cE "^--- FAIL" test.log || true)
+          SKIP=$(grep -cE "^--- SKIP" test.log || true)
+          TOTAL=$((PASS + FAIL + SKIP))
+          {
+            echo "## Test results"
+            echo ""
+            echo "| Status  | Count |"
+            echo "|---------|-------|"
+            echo "| Total   | $TOTAL |"
+            echo "| Passed  | $PASS |"
+            echo "| Failed  | $FAIL |"
+            echo "| Skipped | $SKIP |"
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "::notice title=Tests::$PASS passed, $FAIL failed, $SKIP skipped ($TOTAL total)"
 
       - name: Upload coverage to Codecov
         # v6.0.0 ships Node 24 binaries; v5.x still ran github-script@v7
