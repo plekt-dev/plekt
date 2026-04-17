@@ -5,17 +5,22 @@
 [![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg)](https://www.gnu.org/licenses/agpl-3.0)
 [![Go](https://img.shields.io/badge/go-1.25-00ADD8.svg)](https://go.dev/)
 
-Self-hosted workspace where you and your AI work together. One place, every plugin signed and pinned.
+Self-hosted workspace where you and your AI work together. 
+
+WordPress-style plugin platform with one MCP endpoint on top.
 
 ## Why?
 
-Today MCP servers live scattered across the disk. Each one is a console connection, configured by hand, with no UI and no shared state. You glue them together yourself.
+Most MCP setups give the AI tools but no home for the data those tools touch, and no UI for the human. 
+Plekt is both.
 
-Plekt flips that. Add an MCP and you also get a full UI for it, like a WordPress plugin. Each plugin is a mini-app: its own pages, its own data, its own MCP endpoint. Everything lives in the same workspace, so plugins can share state and build on each other.
+Each plugin is a mini-app with its own pages, its own SQLite file, and its own tools. The tools all merge into one federated `/mcp` endpoint. 
+You control per-agent who can call what. Plugins live in the same process so they can share events, build on each other, and the human gets a web UI over all of them.
 
-The vision: a small team works together with their AI on real projects. State stays in one place. Access is shared, not copy-pasted between machines. Permissions per agent, per tool. (Sharing/RBAC is still maturing.)
 
-Think WordPress, but the operator is you and your AI together.
+Every plugin runs inside a WASM sandbox (Extism + Wazero), so a broken or malicious one can't touch the host beyond what it was granted.
+
+Project vision: a small team works together with their AI on real projects, state in one place, access shared per-agent instead of copy-pasted between machines. Sharing/RBAC still maturing.
 
 ## Quick Start
 
@@ -23,12 +28,7 @@ Pick whichever install fits your setup.
 
 ### Native binary
 
-Download from [Releases](https://github.com/plekt-dev/plekt/releases), unpack, run:
-
-```bash
-./plekt-core       # Linux / macOS
-plekt-core.exe     # Windows
-```
+Download from [Releases](https://github.com/plekt-dev/plekt/releases), unpack, run plekt-core.
 
 Open <http://localhost:8080>. Plekt prints a one-time setup token to stdout on first run; copy it from the terminal and paste it into the register form.
 
@@ -81,7 +81,14 @@ Restart the client to pick up the new server.
 
 ## Stack
 
-Go 1.25, Extism (WASM plugins), templ, htmx, modernc.org/sqlite (CGO-free), Ed25519 plugin signing.
+| Layer | Tech |
+|---|---|
+| Core | Go 1.25, single static binary, no CGO |
+| Plugins | Extism + Wazero (WASM sandbox), SQLite per plugin |
+| Storage | modernc.org/sqlite (pure Go) |
+| Web UI | templ + htmx, JetBrains Mono, embedded CSS/JS |
+| MCP | Streamable HTTP (MCP spec 2025-03-26), JSON-RPC 2.0 |
+| Auth | Per-agent Bearer tokens, Ed25519 plugin signatures |
 
 ## Development
 
@@ -100,7 +107,7 @@ CI runs gofmt, vet, race tests, coverage on every push.
 
 ## Contributing
 
-Project is early. Issues, PRs, ideas all welcome. Open one on GitHub.
+Project is early. Issues, PRs, ideas all welcome. Open one on GitHub ❤️
 
 ## License
 
