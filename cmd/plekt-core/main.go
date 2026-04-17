@@ -17,6 +17,11 @@ import (
 	"gopkg.in/yaml.v3"
 
 	_ "modernc.org/sqlite"
+	// Bundles the IANA tzdata into the binary so cron expressions with
+	// named timezones (e.g. "Europe/Berlin") work on every platform,
+	// including Windows hosts and slim container images that ship
+	// without /usr/share/zoneinfo.
+	_ "time/tzdata"
 
 	"github.com/plekt-dev/plekt/internal/agents"
 	"github.com/plekt-dev/plekt/internal/config"

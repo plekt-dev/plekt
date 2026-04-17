@@ -1,3 +1,7 @@
+# 1.0.3 (17.04.2026)
+## Fixes
+- Bundle IANA tzdata into the binary so cron timezones (e.g. `Europe/Berlin`) work on Windows and minimal container images.
+
 # 1.0.2 (17.04.2026)
 
 ## Fixes
